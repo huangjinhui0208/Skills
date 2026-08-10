@@ -1,0 +1,32 @@
+{
+  "skill_name": "autonomous-driving-temporal-safety-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "在 /Users/huangjinhui/Desktop/萨卡班/data 中，以第二次实验为主实验数据，并把 202607091933/record 作为新增的 record 解析数据示例。请输出一个可执行的六层分析输入审计和指标映射，说明现有主分析应如何接入 record 数据；不要修改原始实验目录。",
+      "expected_output": "A source-traceable six-layer input audit that preserves wall-clock D_delay, separates observed from model results, profiles the parsed record, maps record tables primarily to L2/L3, and states unavailable physical claims.",
+      "files": [],
+      "expectations": [
+        "The output explicitly covers L1 through L6.",
+        "The output keeps wall-clock speed integration as the main D_delay definition.",
+        "The output separates observed/data results from model/predicted results.",
+        "The output uses parsed record data for timing/freshness/gap evidence without treating it as collision truth.",
+        "The output states that the bridge reads Control directly in the current architecture.",
+        "The output creates or describes a reproducible record profile and source-provenance mapping."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "只给你 /Users/huangjinhui/Desktop/萨卡班/data/202607091933/record 这一个 Apollo record 解析目录。请判断六层框架中哪些指标可以直接计算、哪些不能，并生成 record timing profile。不要从缺失的物理数据中猜测 Dynamic Deadline、Distance Debt、制动余量或碰撞结局。",
+      "expected_output": "A deterministic record profile plus a layer-by-layer availability audit that distinguishes message-level reaction/data age from physical reaction time and refuses to invent L4-L6 results.",
+      "files": [],
+      "expectations": [
+        "A JSON record timing profile is generated from the parsed export.",
+        "Message-level sensor-to-Control reaction time is not mislabeled as physical T_R.",
+        "Dynamic Deadline, physical timing slack, Distance Debt, braking margin, and collision are marked unavailable from record alone.",
+        "Parse coverage, missing tables, update gaps, Planning age/reuse, and module latency are audited.",
+        "No model value is presented as an observed result."
+      ]
+    }
+  ]
+}
