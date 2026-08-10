@@ -4,11 +4,11 @@
     {
       "id": 1,
       "prompt": "在 /Users/huangjinhui/Desktop/萨卡班/data 中，以第二次实验为主实验数据，并把 202607091933/record 作为新增的 record 解析数据示例。请输出一个可执行的六层分析输入审计和指标映射，说明现有主分析应如何接入 record 数据；不要修改原始实验目录。",
-      "expected_output": "A source-traceable six-layer input audit that preserves wall-clock D_delay, separates observed from model results, profiles the parsed record, maps record tables primarily to L2/L3, and states unavailable physical claims.",
+      "expected_output": "A source-traceable six-layer input audit that preserves canonical wall-clock D_response, separates observed from model results, profiles the parsed record, maps record tables primarily to L2/L3, and states unavailable physical claims.",
       "files": [],
       "expectations": [
         "The output explicitly covers L1 through L6.",
-        "The output keeps wall-clock speed integration as the main D_delay definition.",
+        "The output keeps wall-clock speed integration as the canonical D_response definition and treats D_delay only as a legacy alias.",
         "The output separates observed/data results from model/predicted results.",
         "The output uses parsed record data for timing/freshness/gap evidence without treating it as collision truth.",
         "The output states that the bridge reads Control directly in the current architecture.",
@@ -26,6 +26,40 @@
         "Dynamic Deadline, physical timing slack, Distance Debt, braking margin, and collision are marked unavailable from record alone.",
         "Parse coverage, missing tables, update gaps, Planning age/reuse, and module latency are audited.",
         "No model value is presented as an observed result."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "某次实验只给出一个500 ms Fusion最大gap，没有基线分布、标称周期或需求阈值。请按TCPS-PA v2判断L2和总体归因。",
+      "expected_output": "The maximum is retained as case-level OBSERVED_DERIVED evidence, while C2 group degradation and downstream strong attribution are rejected or capped.",
+      "files": [],
+      "expectations": [
+        "The answer identifies the missing reference/distribution.",
+        "It does not call the single maximum group-level degradation.",
+        "It records an update-gap defeater and caps downstream claim strength."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "一次run发生碰撞，T_R已观测，但唯一deadline来自同run完整制动轨迹反推。请生成C4、C5、C6和C7 verdict。",
+      "expected_output": "C4 is retrospective-only/not testable as a primary failure, primary C5 debt is unavailable, C6 may use direct collision evidence, and C7 remains weak/partial.",
+      "files": [],
+      "expectations": [
+        "The same-run deadline is typed RETROSPECTIVE_RECONSTRUCTION.",
+        "Collision does not establish temporal correctness failure.",
+        "No retrospective debt is relabeled observed primary debt.",
+        "Strong L6 does not hide weak L4/L5."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "审计一个六层齐全、schema全部正确的报告：C4使用未验证模型deadline并写PASS，C5把模型Distance Debt写成observed，P_FUNC只有链路存在却写‘功能正确但时间错误’，且critical defeater仍OPEN。",
+      "expected_output": "The semantic argument validator fails the report despite complete formatting and lists model taint, P_FUNC, and open-defeater violations.",
+      "files": [],
+      "expectations": [
+        "The report fails semantic validation.",
+        "V3/V5, V6, and V16 are identified.",
+        "The answer explains that schema completeness does not grant inference validity."
       ]
     }
   ]
