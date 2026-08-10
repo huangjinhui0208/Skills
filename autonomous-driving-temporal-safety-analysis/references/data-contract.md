@@ -1,5 +1,7 @@
 # Data contract and evidence routing
 
+This contract defines source semantics and evidence extraction. Evidence-to-claim eligibility is governed by [inference-contract.md](inference-contract.md); source availability alone never establishes a claim.
+
 ## 1. Source priority
 
 Use sources by what they can actually prove, not by convenience.
@@ -9,11 +11,31 @@ Use sources by what they can actually prove, not by convenience.
 | Bridge/SCB logs | requested and applied timing intervention | does not prove physical response or collision |
 | Apollo module logs | target decisions, solver/fallback evidence, tagged event times | logging can be incomplete and timestamp semantics vary |
 | Trace events/message context | stage timing and causal propagation | monotonic timestamps require an anchor to wall time |
-| Localization | wall-time speed/acceleration, response onset, distance integral | spatial displacement is diagnostic, not the main `D_delay` |
+| Localization | wall-time speed/acceleration, response onset, distance integral | spatial displacement is diagnostic, not the canonical `D_response` |
 | CARLA collision CSV/JSONL | direct collision event, actor, frame, impulse | no event file alone does not prove a safe stop if collection is incomplete |
 | CARLA actor history | final geometry, target association, sim/wall diagnostics | CARLA sim time must not replace the wall-clock main metric |
 | Parsed cyber record | channel messages, headers, module timing, freshness, gaps, reuse | only channels/messages written into the record are observable |
 | Existing reports/tables | schema examples and prior claims to re-check | never substitute them for raw-data recomputation |
+
+## 1.1 Evidence typing at extraction time
+
+Create an evidence ID when a source fact or derived metric first becomes usable. Assign one primary class from the inference contract and preserve limitation/taint tags.
+
+Examples:
+
+| Item | Primary evidence class | Limitation/taint |
+|---|---|---|
+| SCB applied wall delay | `DIRECT_OBSERVED` | proves application at logged scope only |
+| `T_R=t2-t1` on compatible wall clock | `OBSERVED_DERIVED` | endpoint and lineage assumptions remain |
+| `D_response=integral(v dt_wall)` | `OBSERVED_DERIVED` | inherits t1/t2/clock quality |
+| same-run stopping-derived deadline | `RETROSPECTIVE_RECONSTRUCTION` | `RETRO_TAINT`; not primary C4 |
+| predeclared external response limit | `INDEPENDENT_REQUIREMENT` | must pass P_DEADLINE scenario/uncertainty checks |
+| current-sample fitted deadline | `UNVALIDATED_MODEL` | `MODEL_TAINT`; exploratory only |
+| collision event | `DIRECT_OBSERVED` | establishes collision, not why |
+| nearest-time module match | `WEAK_TEMPORAL_ALIGNMENT` | no strong C3 |
+| collision-truncated braking | `DIRECT_OBSERVED` plus `OUTCOME_TRUNCATED` | no full stopping endpoint |
+
+Save the evidence type, clock, source locator, availability, confidence, supported/challenged claims, and limitations in `evidence_ledger.csv`.
 
 ## 2. Current experiment directory patterns
 
@@ -46,6 +68,19 @@ Do not require all files for every run. Inventory them and make availability exp
 Prefer a `record/` directory nested under the same run directory. Otherwise create an explicit association table with `run_id`, `record_dir`, source record filename, collection start/end, and association method. A similar timestamp or directory name is supporting evidence, not a sufficient causal join when runs overlap.
 
 After profiling, left-join `record_timing_diagnostics.csv` to the experiment's run-level table on the audited `run_id` association. Preserve runs without record data and add `record_profile_available=false`; do not restrict group statistics to record-available runs unless the metric itself is record-only.
+
+### 2.2 Fault-to-run association and pre-hazard coverage
+
+For every run, locate nominal configuration and direct fault application. Save requested/actual magnitude, onset/end, scope, affected message count, queue/drop/reorder behavior, and evidence class in `temporal_fault_signature.csv`.
+
+If direct/derived onset precedes `t1`, extract the `[t_fault,t1]` state window when possible. Include position, velocity, acceleration, heading, steering, throttle, brake, Control/Bridge apply, CARLA frame, route progress, and target state. Missing fields stay `MISSING`; do not infer unchanged state.
+
+Classify D1, v1, a1, heading, and route progress as:
+
+- `PRE_EXISTING_CONFOUNDER` only when evidence supports independence from treatment;
+- `POSSIBLE_MEDIATOR` when the pre-t1 fault could have produced divergence;
+- `POST_TREATMENT_STATE` when treatment causally preceded/measurably changed it;
+- `UNKNOWN` when causal role cannot be resolved.
 
 ## 3. Parsed record export contract
 
@@ -129,6 +164,16 @@ Before using `effect - source`:
 4. save the matching key/sequence/trace provenance;
 5. state whether the result is source age, publication latency, receipt latency, or physical reaction time.
 
+### 4.1 Clock and phase audit
+
+Create `clock_phase_audit.csv` with `clock_domain`, host, timestamp type, synchronization/anchor method, offset estimate, drift estimate, alignment residual, timestamp resolution, and confidence. A single-domain wall interval may remain valid even when cross-host stage decomposition is not.
+
+Record CARLA fixed step and Control/Planning/Localization periods plus phase-to-tick values when available. Discrete 300/400/700/800/900 ms clusters without an active phase scan are `PHASE_EFFECT_HYPOTHESIS`, not established phase causation.
+
+### 4.2 Causal-lineage extraction
+
+For each claimed chain, retain source/Fusion/Prediction/Planning/Control/actuation event IDs, matching keys, method, and grade A/B/C/D/UNKNOWN. A physical `T_R` can be valid as a wall-clock interval while strict lineage remains grade C or lower.
+
 ## 5. Six-layer evidence routing
 
 | Layer | Primary experiment evidence | Record supplement |
@@ -140,6 +185,30 @@ Before using `effect - source`:
 | L5 Propagation | Localization wall-time speed integral | record Localization can cross-check if the required wall-time window and endpoint mapping exist |
 | L6 Safety | collision events, actor history, actual stop trajectory/final clearance | command/feedback can support braking execution but not replace direct outcome evidence |
 
+## 5.1 Functional-correctness extraction
+
+Create `functional_correctness_audit.csv`. Extract, without upgrading missing values:
+
+- physical target identity;
+- Perception target presence and tracking continuity;
+- Prediction presence and semantic validity;
+- Planning STOP presence, target correctness, location reasonableness, trajectory validity, fallback/infeasibility;
+- Control receipt of relevant trajectory, braking command, and continuity;
+- Bridge payload receive/apply;
+- physical response.
+
+Each item is `PASS`, `DEGRADED`, `FAIL`, or `UNKNOWN`. The overall P_FUNC verdict is `QUALIFIED_PASS`, `PARTIAL`, `FAIL`, or `NOT_TESTABLE`. Output presence alone does not establish correctness.
+
+## 5.2 Deadline-requirement extraction
+
+Maintain a requirement registry containing requirement ID/name/value, provenance, pre-registration, external/internal origin, safety meaning, calibration/validation domain, uncertainty bounds, and evidence class.
+
+Keep three sources separate:
+
+- `tau_retro`: same-run post-outcome reconstruction;
+- `tau_req`: independently qualified prospective requirement;
+- `tau_model`: model prediction with validation class.
+
 ## 6. Current second-experiment schema example
 
 The current workspace's raw-data-first analysis already establishes useful field conventions:
@@ -148,11 +217,14 @@ The current workspace's raw-data-first analysis already establishes useful field
 - `T_e2e_data_observed_ms`;
 - `D1_clear_data_observed_m`;
 - `D_delay_wall_integral_data_observed_m`;
+- `D_response_wall_integral_data_observed_m` as the canonical v2 name; keep `D_delay_wall_integral_data_observed_m` as a deprecated alias;
 - `D2_clear_data_observed_m`;
 - `D_brake_data_observed_m`;
 - `M_collision_0m_data_observed_m` and `M_safety_6m_data_observed_m`;
 - stage latency and continuity diagnostics;
 - separately stored counterfactual model fields.
+
+Legacy fields named `tau_dynamic_data_derived_ms` require provenance reassessment. If they use same-run full-stop braking, reclassify them as `tau_retro`, not qualified `tau_req`. Legacy `D_distance_debt_model_predicted_m` retains model taint.
 
 Inspect `report_workspace/README.md` and `report_workspace/tables/run_level_metrics.csv` for the current schema. Re-run raw parsing for new results; do not copy old values into a new analysis.
 
@@ -181,5 +253,12 @@ Use stable flag names where possible:
 - `COLLISION_GEOMETRY_CONFLICT`
 - `OBSERVED_VALUE_UNAVAILABLE`
 - `MODEL_ONLY_NOT_OBSERVED`
+- `RETROSPECTIVE_ONLY_NOT_REQUIREMENT`
+- `REFERENCE_MISSING`
+- `SINGLE_MAX_ONLY`
+- `PRE_HAZARD_AUDIT_REQUIRED`
+- `POST_TREATMENT_STATE_UNCLASSIFIED`
+- `FUNCTIONAL_CORRECTNESS_NOT_QUALIFIED`
+- `OPEN_CRITICAL_DEFEATER`
 
 Each flag should name affected outputs and source evidence.

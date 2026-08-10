@@ -275,10 +275,17 @@ def build_profile(record_dir: Path) -> dict[str, Any]:
         quality_flags.append("RECORD_WINDOW_FILTERED")
 
     return {
-        "profile_schema_version": "1.0",
+        "profile_schema_version": "2.0",
         "run_id_inferred": record_dir.parent.name,
         "record_dir": str(record_dir.resolve()),
-        "evidence_class": "record_derived_timing_diagnostic",
+        "evidence_class": "OBSERVED_DERIVED",
+        "claim_eligibility": {
+            "C2": "PARTIAL_ONLY_UNLESS_REFERENCE_OR_REQUIREMENT_IS_PROVIDED",
+            "C3": "PARTIAL_ONLY_WITHOUT_TRACE_LINEAGE",
+            "C4": "NOT_TESTABLE_FROM_RECORD_PROFILE_ALONE",
+            "C5": "NOT_TESTABLE_FROM_RECORD_PROFILE_ALONE",
+            "C6": "NOT_TESTABLE_FROM_RECORD_PROFILE_ALONE",
+        },
         "scope_warning": (
             "This timing profile does not itself run target-association or physical-endpoint "
             "detection, and therefore does not establish a dynamic deadline, endpoint-compatible "
@@ -303,6 +310,13 @@ def build_profile(record_dir: Path) -> dict[str, Any]:
             "notes": summary.get("notes") or [],
         },
         "layer_2_temporal_degradation": {
+            "reference_qualification": {
+                "status": "MISSING_UNLESS_SUPPLIED_SEPARATELY",
+                "rule": (
+                    "A maximum gap or slow message is a case-level observation; C2 requires an "
+                    "explicit requirement, baseline distribution, or declared nominal reference."
+                ),
+            },
             "key_topic_rates": topic_rates(record_dir),
             "key_channel_update_gaps": channel_timing(record_dir),
             "planning_total_time_ms": unique_numeric_summary(
@@ -323,6 +337,11 @@ def build_profile(record_dir: Path) -> dict[str, Any]:
             "abnormal_frames": abnormal_frames(record_dir),
         },
         "layer_3_cause_effect_timing": {
+            "causal_lineage_grade": "C",
+            "lineage_limitation": (
+                "Message timing alignment without an explicit trace ID, propagated sequence, or "
+                "validated provenance mapping establishes temporal association only."
+            ),
             "sensor_to_control_message_diagnostics": reaction_age_summary(record_dir),
             "record_minus_header_clock_offsets_ms": clock_offset_summary(record_dir),
         },

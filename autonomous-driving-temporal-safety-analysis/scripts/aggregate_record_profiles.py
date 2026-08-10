@@ -36,6 +36,9 @@ def build_row(profile: dict[str, Any]) -> dict[str, Any]:
     row: dict[str, Any] = {
         "run_id": profile.get("run_id_inferred"),
         "record_dir": profile.get("record_dir"),
+        "record_evidence_class": profile.get("evidence_class"),
+        "l2_reference_qualification": nested(l2, "reference_qualification", "status"),
+        "l3_causal_lineage_grade": l3.get("causal_lineage_grade"),
         "record_channel_count": coverage.get("channel_count"),
         "record_message_count": coverage.get("message_count"),
         "record_parse_error_count": len(coverage.get("parse_errors") or {}),
