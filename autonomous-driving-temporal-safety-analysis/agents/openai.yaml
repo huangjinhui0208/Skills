@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autonomous-Driving Temporal Safety"
+  short_description: "Evidence-bound six-layer real-time safety analysis"
+  default_prompt: "Use $autonomous-driving-temporal-safety-analysis to produce an evidence-constrained six-layer real-time safety analysis."
