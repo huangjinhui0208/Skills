@@ -1,174 +1,186 @@
 ---
 name: autonomous-driving-temporal-safety-analysis
-description: Analyze CARLA/Apollo autonomous-driving experiments and Apollo cyber record parsed exports with the six-layer temporal-correctness-to-physical-safety framework. Use this skill whenever a user asks about autonomous-driving delay, jitter, backlog, stale data, update gaps, end-to-end reaction time, dynamic deadline, timing slack, distance debt, braking margin, near miss, collision causality, bridge delay injection, Trace/log/record fusion, or wants a per-run or cross-run timing-safety report—even if they do not explicitly mention the six layers. It is specialized for raw-data-first, evidence-traceable analysis that keeps observed/data results separate from model/predicted results.
-compatibility: Requires Python 3.9+ for bundled profiling and validation scripts. Optional analysis dependencies may include numpy, pandas, PyYAML, and matplotlib when the workspace's existing analysis code uses them.
+description: Apply TCPS-PA v2, an evidence-constrained Claim–Evidence diagnostic protocol, to CARLA/Apollo autonomous-driving experiments and parsed Apollo cyber records. Use for delay, jitter, backlog, staleness, update gaps, physical reaction time, dynamic deadlines, timing slack, response distance, distance debt, braking margin, near miss, collision attribution, bridge injection, Trace/log/record fusion, six-layer reports, real-time-systems engineering reports, paper-method instantiation, or audits of whether evidence is strong enough to support a timing-safety conclusion. It keeps observed, retrospective, requirement-qualified, and model-supported results separate and rejects methodologically invalid but format-complete six-layer narratives.
 ---
 
-# Autonomous-driving temporal correctness to physical safety analysis
+# TCPS-PA Diagnostic Protocol v2
 
-Use this workflow to turn experiment artifacts into an auditable six-layer argument:
+This skill is not primarily a report-generation workflow. It is an evidence-constrained diagnostic protocol for Temporal Correctness-to-Physical Safety Propagation Analysis.
 
-`temporal disturbance -> temporal symptoms -> cause-effect timing -> temporal correctness -> distance debt -> physical safety outcome`
+Use the operational sequence:
 
-The point is not merely to show that a module became slower. Establish whether a timing disturbance propagated through the closed loop, exceeded a deadline independently determined from vehicle physics, consumed physical distance, and changed an observed safety outcome.
+`Detect -> Characterize -> Trace -> Judge -> Quantify -> Attribute`
 
-## Read the relevant references first
+Do not infer a six-layer story merely because every layer has a metric. Build and validate the Claim–Evidence argument before writing prose.
 
-- Read [references/six-layer-method.md](references/six-layer-method.md) before defining metrics or writing conclusions.
-- Read [references/data-contract.md](references/data-contract.md) when locating experiment logs, Trace files, bridge/SCB evidence, collision evidence, or `record/` parsed exports.
-- Read [references/report-contract.md](references/report-contract.md) before creating final tables, figures, or reports.
+## Read before analysis
 
-## Non-negotiable analysis rules
+Read all five contracts before constructing claims:
 
-1. Treat raw experiment directories as read-only. Write all generated artifacts to a separate analysis workspace.
-2. Define every event endpoint and clock before calculating a duration or distance. Do not silently rename an existing endpoint.
-3. Use wall-clock vehicle speed trapezoidal integration for the main response-stage distance:
+1. [references/six-layer-method.md](references/six-layer-method.md) for domain quantities and layer hypotheses.
+2. [references/data-contract.md](references/data-contract.md) for source semantics, clocks, record exports, and missing-data rules.
+3. [references/inference-contract.md](references/inference-contract.md) for Claim Graph, admissibility, taint, prerequisites, defeaters, and inference gates.
+4. [references/claim-strength-contract.md](references/claim-strength-contract.md) for conclusion ceilings and legal language.
+5. [references/report-contract.md](references/report-contract.md) for ledgers, audit tables, report structure, and deliverables.
 
-   `D_delay_wall_integral_m = integral(t1, t2, v(t) dt_wall)`
+## Non-negotiable rules
 
-   CARLA frames, simulation time, realtime factor, and Localization spatial displacement are diagnostics, not substitutes.
-4. Save observed/data and model/predicted results separately. Never fill a missing observed value with a model estimate.
-5. Derive the dynamic physical deadline from vehicle state and braking/safety assumptions independently of the measured reaction time. Compare afterward.
-6. Do not equate a deadline miss with a collision. Preserve the chain `deadline miss -> distance debt -> margin loss -> outcome`.
-7. Keep Reaction Time, Data Age, and Update Continuity as separate timing semantics.
-8. Do not use Guardian as the commanded-actuation source when the experiment architecture states that the bridge reads Control directly.
+1. Keep raw experiment directories read-only and write generated artifacts to a separate analysis directory.
+2. Type every important item as evidence before using it in a claim. Preserve `DIRECT_OBSERVED`, `OBSERVED_DERIVED`, `TRACE_LINEAGE`, `RETROSPECTIVE_RECONSTRUCTION`, requirement/model classes, uncertainty classes, and taint.
+3. Separate observed/data, retrospective reconstruction, qualified requirement, and model/predicted outputs. Never fill an observed field with a model.
+4. Use `D_response_wall_integral_data_observed_m = integral(t1,t2,v dt_wall)` as the canonical response-stage distance. Keep `D_delay_wall_integral_data_observed_m` only as a deprecated compatibility alias.
+5. Calculate primary `D_debt` only from a qualified independent `tau_req` plus an observed velocity path. Call retro-derived debt `D_debt_retro_diagnostic`; keep model debt visibly model-tainted.
+6. Treat Reaction Time, Data Age, Update Continuity, and strict causal lineage as distinct semantics.
+7. Require an explicit reference before claiming temporal degradation. A single maximum gap without a distribution/reference is only a case-level observation.
+8. Distinguish physical reaction interval `T_R=t2-t1` from traced cause-effect propagation. Record lineage grade A/B/C/D/UNKNOWN.
+9. Do not use a same-run post-outcome stopping process as the primary Temporal Correctness requirement. It is retrospective reconstruction.
+10. Do not equate deadline miss with collision or collision with temporal failure.
+11. A collision-truncated run cannot contain a fabricated full observed stopping distance or full-stop margin.
+12. If fault onset precedes `t1`, run the pre-hazard state divergence audit and classify D1/v1/a1 changes as pre-existing confounder, possible mediator, post-treatment state, or unknown.
+13. Apply weakest-link confidence propagation. A downstream claim cannot exceed the weakest critical prerequisite/evidence link.
+14. Keep open critical defeaters visible and cap the affected claim at `UNCERTAIN`/`PARTIAL_PASS` unless the inference contract explicitly allows otherwise.
+15. Only write “functionally correct, temporally wrong” when `P_FUNC=QUALIFIED_PASS` and `C4` is established with a qualified independent deadline.
+16. With one nonzero delay level, describe `Delta T_R / Delta delay` only as an observed incremental end-to-end response ratio, not a stable gain or amplification factor.
+17. Preserve the deployed architecture: the Bridge reads Control directly when Guardian commands are not sent to it.
+18. Treat a full experiment report as three deliverables at once: a real-time-systems engineering analysis, an explicit six-layer method instantiation, and a reproducible future-paper method record. Keep their completion claims separate.
+19. Use the user's requested report language for the main narrative. In a Chinese report, keep headings, explanations, conclusions, limitations, and table descriptions in Chinese; retain English only for canonical IDs, field names, formulas, paths, and standard verdict enums.
 
-## Workflow
+## Mandatory workflow
 
-### 1. Inventory and freeze the scope
+### 1. Freeze scope and extract evidence
 
-Identify:
-
-- experiment root, run directories, groups, nominal injected delays, and expected run count;
-- log, Trace, bridge/SCB, collision, actor-history, collection-window, and configuration files;
-- parsed `record/` directories and their `extraction_summary.json`/`output_manifest.json`;
-- existing analysis scripts and previously generated tables, which are references rather than ground truth;
-- the requested deliverables and output directory.
-
-Run the bundled record profiler for every parsed record directory:
+Inventory runs, groups, fault settings, logs, Trace, Control/Bridge evidence, Localization, collision/actor evidence, configuration, and same-run parsed `record/` exports. Profile every record export with:
 
 ```bash
 python3 <skill-dir>/scripts/profile_record_export.py \
   --record-dir <run>/record \
-  --output <analysis-workspace>/record_profiles/<run-id>.json
+  --output <analysis-dir>/record_profiles/<run-id>.json
 ```
 
-After profiling all runs, create the cross-run record diagnostic table:
+Aggregate profiles with:
 
 ```bash
 python3 <skill-dir>/scripts/aggregate_record_profiles.py \
-  --profiles-dir <analysis-workspace>/record_profiles \
-  --output-csv <analysis-workspace>/tables/record_timing_diagnostics.csv
+  --profiles-dir <analysis-dir>/record_profiles \
+  --output-csv <analysis-dir>/tables/record_timing_diagnostics.csv
 ```
 
-Start with `extraction_summary.json`. Record parse errors, missing expected tables, time windows, and row counts. A successfully parsed record only proves what was written to its channels.
+Record association must be audited and left-joined. Do not attach another experiment's record by a similar directory timestamp.
 
-### 2. Establish the event and clock dictionary
+### 2. Build event, clock, target, and fault dictionaries
 
-Create a per-run event table with at least:
+Define `t_c/t1`, module events, `t_e/t2`, requirements, deadlines, stops/collisions, clock domains, target identity, and the Temporal Fault Signature `F_T`. If `fault_onset < t1`, create `pre_hazard_state_audit.csv` before treating D1 or v1 as a confounder.
 
-- `t_cause` / `t1`: the agreed environment-cause or stable target-source endpoint;
-- `t_perception_output`, `t_prediction`, `t_planning`, `t_control_command`;
-- `t_physical_response` / `t2`: the first sustained physical response endpoint;
-- `t_deadline = t_cause + tau_dynamic`;
-- `t_stop`, `t_collision`, and/or another actual outcome endpoint.
+### 3. Build ledgers before claims
 
-For this workspace's established second-experiment convention, `t1` is the source timestamp of the first frame in a continuous three-frame stable Fusion sequence. `t2` is the end of the first interval satisfying the sustained-deceleration rule. Preserve those definitions when comparing its runs.
+Create:
 
-Track each timestamp's time basis: wall epoch, record receipt time, message header/source time, Trace monotonic time, CARLA simulation time, or CARLA frame. Align clocks explicitly and report alignment residuals. Do not subtract timestamps from different bases without demonstrated alignment.
+- `evidence_ledger.csv` with evidence class, source, clock, confidence, limitations, and claim links;
+- `temporal_fault_signature.csv`;
+- `clock_phase_audit.csv`, `functional_correctness_audit.csv`, and target/deadline qualification evidence;
+- `defeater_ledger.csv` with default and experiment-specific defeaters.
 
-### 3. Build a source-provenance matrix
+Do not draft layer conclusions yet.
 
-For every metric, save:
+### 4. Build prerequisite claims and Claim Graph
 
-- layer;
-- metric name and unit;
-- endpoint definition;
-- clock basis;
-- source file and source columns or lines;
-- observed/derived/model status;
-- availability and missing reason;
-- confidence or data-quality note.
+Evaluate `P_CLOCK`, `P_TARGET`, `P_FUNC`, and `P_DEADLINE`. Then evaluate `C1` through `C6`; evaluate attribution `C7` only after the six layer claims. Store exact dependencies in `claim_edges.csv` and full gate records in `claim_ledger.csv`.
 
-Prefer direct experiment evidence for physical outcomes. Use record-derived timing diagnostics to enrich the timing layers; do not let them overwrite collision truth or actual vehicle motion.
+Each gate must contain an executable `I-M-E-C-O-N` record:
 
-### 4. Analyze all six layers
+- `I / Inputs`: scoped data and prerequisite claims;
+- `M / Metrics`: exact metric names, units, clocks, endpoints, and aggregation scope;
+- `E / Evidence`: admissible evidence classes and linked evidence IDs;
+- `C / Criterion`: a falsifiable decision rule, including uncertainty and missing-data behavior;
+- `O / Output`: verdict, confidence/ceiling, maximum claim level, allowed language, and residual uncertainty;
+- `N / Next`: the exact condition for entering the next canonical claim.
 
-Follow [references/six-layer-method.md](references/six-layer-method.md). Minimum per-layer outputs:
+Store `gate_inputs`, `gate_metrics`, `admissible_evidence`, `gate_criterion`, and `next_gate_condition` in `claim_ledger.csv` for C1-C7. Support/challenge evidence, prerequisites, defeaters, and `O` fields remain the canonical ledger columns.
 
-- **L1 Temporal Disturbance:** requested and actual bridge delay, jitter/load/backlog/gap/staleness/phase conditions, activation time, and intervention verification.
-- **L2 Temporal Degradation:** response variability, tail latency, data freshness, message/update gaps, Planning reuse/age, queueing, and anomalous frames.
-- **L3 Cause-Effect Timing:** event timeline, stage latency decomposition, physical Reaction Time, Data Age at effect, and update continuity. Treat record `sensor_to_control_reaction_age.csv` as a message-level diagnostic, not automatically as physical `T_R`.
-- **L4 Temporal Correctness:** dynamic deadline, timing slack, deadline-miss flag, deadline provenance, and sensitivity to safety margin/braking assumptions.
-- **L5 Temporal-to-Physical Propagation:** wall-integrated response distance, deadline-exceedance distance debt, remaining distance at response, and an explicit total-loss versus incremental-loss distinction.
-- **L6 Physical Safety:** actual braking process, actual endpoint, actual clearance/collision/impact evidence, observed safety margin when calculable, and model predictions in a separate section/table.
+### 5. Evaluate inference rules and taint
 
-### 5. Separate observed and predicted datasets
+Use [references/inference-contract.md](references/inference-contract.md). In particular:
 
-Create at least two run-level outputs:
+- retrospective deadline -> reconstruction only, never primary C4;
+- unvalidated model deadline -> `MODEL_SUPPORTED_ONLY`, not direct deadline miss;
+- weak alignment/uncertain target -> C3 cannot strong-pass;
+- model/retro deadline taint propagates into downstream debt and attribution;
+- critical open defeater -> cap claim strength;
+- `P_FUNC != QUALIFIED_PASS` -> forbid timing-only functional-correctness language.
 
-- `run_level_observed.csv`: direct or data-derived quantities with `_data_observed_` or an equally explicit marker;
-- `run_level_model_predicted.csv`: empirical-model, counterfactual, or predicted quantities with `_model_predicted_`/`_model_` markers.
+### 6. Analyze six layers under gates
 
-Collision runs often lack a full observed stopping distance. Save truncated braking-to-collision separately, keep full stopping distance and stopping-margin fields unavailable, and report the collision itself as the observed outcome.
+- **L1 / C1:** verify the fault signature and actual entry into the SUT/closed loop.
+- **L2 / C2:** establish degradation only against a declared reference and distribution; summarize Reaction, Age, and Gap with per-run availability plus P50/P90/P95/P99/MAX and IQR/MAD.
+- **L3 / C3:** separate physical reaction interval from strict causal lineage and apply P_CLOCK/P_TARGET ceilings.
+- **L4 / C4:** compare observed `T_R` only with a qualified prospective `tau_req`; keep `tau_retro` and `tau_model` separate.
+- **L5 / C5:** separate total response distance, qualified deadline-excess debt, retro/model diagnostics, and endpoint-compatible space-budget contributions. Keep collision-truncated runs out of full-stop decompositions.
+- **L6 / C6:** report continuous safety degradation and direct outcome evidence with threshold provenance.
+- **Attribution / C7:** evaluate functional, initial-state, physical, freshness, phase, geometry, and outcome-conflict alternatives.
 
-When evaluating a model, compare it only with endpoint-, clock-, and distance-compatible observed results. Report signed error, absolute error, relative error when the denominator is valid, and error direction.
+### 7. Generate prose from Claim Ledger
 
-### 6. Perform quality and causal audits
+The report is downstream of:
 
-At minimum audit:
+`Evidence Ledger -> Claim Ledger -> Defeater Ledger -> Claim Graph -> Report`
 
-- expected versus found runs and files;
-- parse errors and empty/high-volume tables;
-- target identity across Perception, Prediction, Planning, and CARLA actor evidence;
-- timestamp monotonicity, negative ages, clock alignment, and record-window coverage;
-- `D_delay` integral versus independent spatial-displacement diagnostic;
-- stopping endpoint quality and collision/geometry contradictions;
-- intervention fidelity and actual versus requested bridge delay;
-- confounders such as initial clearance, initial speed, perception gaps, braking capability, and solver fallback.
+Begin with the Six-Layer Inference Status Matrix. For each layer render the `I-M-E-C-O-N` gate plus support, counter-evidence, open defeaters, allowed conclusion, and what remains unproven. Executive language must obey the weakest intermediate claim; strong C1/C6 cannot conceal weak C4/C5.
 
-Use `UNKNOWN`/`UNAVAILABLE` with a reason when evidence conflicts. Do not remove a run merely because it is inconvenient; state the exclusion criterion and retain its diagnostic rows.
+For a full experiment analysis, also render and link:
 
-### 7. Produce the deliverables
+- a report-positioning and method-completeness matrix that distinguishes `completed`, `partial`, and `not established`;
+- architecture, event semantics, clock/phase audit, functional-correctness audit, and pre-hazard state divergence;
+- the full Temporal Fault Signature, including explicit missing end/duration/message/drop/reorder fields;
+- `realtime_rag_summary.csv` and an R/A/G tail-distribution figure or equivalent table;
+- observed per-run and group space-budget decompositions, with endpoint compatibility and right-censoring visible;
+- continuous physical-safety outcomes and threshold provenance;
+- model-versus-observed error analysis in a separate section;
+- per-run observed results, exclusions, small-n limits, exact reproduction commands, and future evidence/experiment requirements.
 
-Use the exact minimum artifact set in [references/report-contract.md](references/report-contract.md). The report's main results and conclusions must use observed/data results. Put prediction, counterfactual restoration, and fitted braking models in a clearly separated model section.
+Do not label the method empirically complete merely because the Claim Graph and six layer sections exist. Missing independent `tau_req`, record-enabled lineage, phase scan, functional qualification, multiple nonzero fault levels, negative controls, or cross-system validation must remain visible in the method-completeness matrix.
 
-Run validation after generating outputs:
+### 8. Validate the argument
+
+Run:
 
 ```bash
 python3 <skill-dir>/scripts/validate_analysis_outputs.py \
-  --analysis-dir <analysis-workspace>
+  --analysis-dir <analysis-dir>
 ```
 
-Resolve validation errors before presenting conclusions. Warnings may remain only when they are explained in the data-quality report.
+The validator checks schemas and the argument: prerequisite closure, evidence admissibility, taint, deadline qualification, open defeaters, confidence ceilings, lineage/clock restrictions, pre-hazard audit, claim language, and forbidden inference patterns. Resolve errors rather than weakening rules.
 
-## Interpretation discipline
+For record-only inputs, run the reduced availability audit after profiling:
 
-Use claim strength that matches the evidence:
+```bash
+python3 <skill-dir>/scripts/validate_analysis_outputs.py \
+  --analysis-dir <analysis-dir> \
+  --mode record-only
+```
 
-- **Observed association:** timing and outcome moved together under the measured run conditions.
-- **Supported propagation:** measured timing increase produced measured response-distance increase and margin reduction.
-- **Causal contribution:** intervention fidelity and competing explanations have been checked.
-- **Sole cause:** reserve for designs that isolate other relevant changes; ordinary run comparisons rarely justify it.
+This mode validates that record evidence stays diagnostic and that C4-C6 remain `NOT_TESTABLE`; it does not demand empty physical-outcome tables.
 
-Prefer language such as “the primary supported contributor under this run's measured state” when initial clearance, freshness, solver behavior, or braking ability also differ.
+For legacy v1 outputs, create conservative v2 ledgers and reassessment with:
 
-## Existing workspace integration
+```bash
+python3 <skill-dir>/scripts/bootstrap_inference_ledgers.py \
+  --analysis-dir <analysis-dir>
+```
 
-When operating in the current CARLA 0.9.15/Apollo 10 workspace:
-
-- inspect `report_workspace/README.md` and reuse its raw-data-first parser functions where appropriate;
-- treat `report_workspace/tables/run_level_metrics.csv` as a useful schema example, not a replacement for rerunning the source analysis;
-- use each run's parsed `record/07_diagnostics/` tables to add freshness, gap, reuse, and message-level reaction/age evidence;
-- preserve the architecture fact that the bridge reads Control directly because Guardian commands are not currently sent to the bridge.
+Bootstrap output is an audit/migration aid. UNKNOWN remains UNKNOWN and does not become PASS.
 
 ## Completion criteria
 
-The task is complete only when:
+Complete the task only when:
 
-- every included run has a traceable evidence row or an explicit unavailable reason;
-- the six layers are connected without skipping the deadline comparison or distance propagation;
-- wall-clock response distance is used consistently across runs;
-- observed and model results are physically and visibly separated;
-- collision claims agree with direct event evidence or are marked uncertain;
-- validation passes, and the report names remaining limitations.
+- every important metric is typed in the evidence ledger;
+- prerequisite claims, C1-C7, edges, and defeaters are explicit;
+- layer gates reflect evidence eligibility rather than metric presence;
+- C1-C7 have nonempty `I-M-E-C-O-N` gate fields and an explicit next-gate condition;
+- response distance uses wall-clock integration and distance debt carries its requirement/model/retro provenance;
+- collision right-censoring and observed/model separation hold;
+- a full experiment report includes R/A/G tail statistics, endpoint-compatible space-budget tables, and a method-completeness matrix;
+- the report explicitly separates structural method instantiation from empirically unclosed evidence bridges;
+- open critical defeaters and residual uncertainty remain visible;
+- the report language does not exceed the Claim Ledger ceiling;
+- semantic validation passes, or a legacy report's failure is explicitly retained as a v2 reassessment finding.

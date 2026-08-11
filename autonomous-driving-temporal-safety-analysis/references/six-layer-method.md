@@ -1,226 +1,328 @@
-# Six-layer analysis method
+# TCPS-PA v2 six-layer domain method
 
-## 1. Purpose and logical direction
+## Contents
 
-The framework asks whether an autonomous-driving system can lose temporal correctness, and then physical safety, even when its functional result is correct.
+1. Purpose and event notation
+2. Common layer-gate structure
+3. L1 Temporal Fault Signature
+4. L2 Temporal Degradation
+5. L3 Cause-Effect Temporal Propagation
+6. L4 Temporal Correctness
+7. L5 Temporal-to-Physical Propagation
+8. L6 Physical Safety Degradation
+9. C7 Temporal Safety Attribution
+10. Cross-run and feedback rules
 
-Use this directed chain:
+## 1. Purpose and event notation
 
-`cause -> manifestation -> system effect -> constraint violation -> physical propagation -> safety outcome`
+The domain chain is:
 
-Dynamic Deadline is an independent input to Layer 4, produced from physical state. It is not a downstream output of the measured cause-effect timing chain.
+`temporal disturbance -> timing degradation -> physical reaction interval/lineage -> qualified requirement comparison -> physical-space propagation -> safety degradation`
 
-## 2. Event notation
+The inference chain is governed separately by [inference-contract.md](inference-contract.md). A quantity in a layer does not imply the layer claim passes.
 
 | Symbol | Meaning | Typical workspace mapping |
 |---|---|---|
-| `t_c` | external cause/source endpoint | `t1`, stable target source time |
+| `t_f` | fault onset | first applied Bridge/SCB delay or internal anomaly onset |
+| `t_c` / `t1` | environment/source cause endpoint | first source timestamp in continuous three-frame stable Fusion sequence |
 | `t_p` | relevant Perception/Fusion output | stable target output header/publish time |
-| `t_pred` | first causally related Prediction output | trace/log/record matched output |
-| `t_plan` | first target-related Planning decision/output | STOP/deceleration decision |
-| `t_ctrl` | first causally related Control command | Control command or aligned trace event |
-| `t_e` | physical effect endpoint | `t2`, sustained effective braking onset |
-| `t_d` | latest allowed physical response time | `t_c + tau*` |
+| `t_pred` | causally related Prediction output | trace/sequence/header-matched output |
+| `t_plan` | relevant Planning output | target-related STOP/deceleration decision |
+| `t_ctrl` | relevant Control command | Control command/trace event; Bridge reads Control in the current deployment |
+| `t_e` / `t2` | physical response endpoint | sustained effective braking onset |
+| `t_d` | qualified deadline endpoint | `t_c + tau_req` |
 | `t_o` | observed outcome endpoint | stop, collision, minimum-speed proxy, or collection end |
 
-Every table must state whether its time is wall epoch, message-source/header time, record receipt time, Trace monotonic time, simulation time, or frame index.
+Every timestamp must state clock domain, host, type, resolution, and alignment status. Do not subtract incompatible clocks.
 
-## 3. Layer 1 - Temporal Disturbance
+## 2. Common layer-gate structure
 
-Question: what timing disturbance entered the system?
+Evaluate every layer as an executable `I-M-E-C-O-N` gate:
 
-Examples:
+- `I / Inputs`: scoped data plus required prerequisite claims;
+- `M / Metrics`: exact metric, unit, clock, endpoints, and aggregation scope;
+- `E / Evidence`: admissible evidence classes, supporting/challenging evidence IDs, and defeaters;
+- `C / Criterion`: falsifiable rule, uncertainty comparison, reference, and missing-data behavior;
+- `O / Output`: verdict (`PASS`, `PARTIAL_PASS`, `FAIL`, `UNCERTAIN`, `NOT_TESTABLE`, `RETROSPECTIVE_ONLY`, or `MODEL_SUPPORTED_ONLY`), confidence/ceiling, maximum claim strength, allowed language, and residual uncertainty;
+- `N / Next Gate`: the precise conditions needed to enter the next canonical claim.
 
-- fixed or random delay;
-- jitter and long-tail execution;
-- CPU/GPU interference;
-- queue backlog;
-- message/network delay;
-- update loss or gap;
-- stale data;
-- period or phase mismatch.
+Store I/M/E/C/N in `claim_ledger.csv` as `gate_inputs`, `gate_metrics`, `admissible_evidence`, `gate_criterion`, and `next_gate_condition`. Store O in the canonical verdict/confidence/claim-strength/language fields. A narrative layer section is not a gate unless all six parts are explicit.
 
-Evidence should include nominal configuration and actual execution. For bridge delay injection, retain requested delay, actual wall delay, actual frame delay, activation time, queue depth, and lifecycle status separately.
+`NOT_TESTABLE` is a valid completed analysis result.
 
-Layer 1 describes the intervention. It does not by itself establish danger.
+## 3. L1 — Temporal Fault Signature
 
-## 4. Layer 2 - Temporal Degradation
+### Hypothesis C1
 
-Question: what observable timing symptoms appeared?
+A declared temporal disturbance actually entered the SUT/closed loop with known location, timing, magnitude, pattern, and scope.
 
-Analyze three parallel dimensions:
+### Fault signature
 
-### 4.1 Response-time variability
+Define:
 
-Across frames and runs, report median, p90, p99, maximum, outliers, and variability for relevant stages. Avoid reporting only the mean.
+```text
+F_T = {
+  fault_type, location, onset, duration, magnitude, distribution,
+  pattern, scope, affected_messages
+}
+```
 
-### 4.2 Data freshness
+Examples: fixed/random delay, jitter, CPU/GPU interference, queue backlog, network delay, loss/gap, staleness, phase/period mismatch.
 
-For a causally matched source/effect pair:
+For Bridge injection retain requested magnitude, actual wall delay, actual frame/sim delay, activation/apply time, queue behavior, lifecycle, affected message count, drop/reorder status, and payload scope separately.
+
+Configuration proves intent. Applied rows/direct instrumentation prove actual entry. L1 does not prove degradation, propagation, danger, or cause of collision.
+
+### Pre-hazard trigger
+
+If `t_f < t1`, create `pre_hazard_state_audit.csv`. Do not automatically treat D1/v1 differences as pre-existing confounders; they may be treatment-induced mediators or post-treatment state.
+
+## 4. L2 — Temporal Degradation
+
+### Hypothesis C2
+
+Observable timing behavior degraded relative to an explicitly declared reference.
+
+### Required reference
+
+Use one or more:
+
+- `BASELINE_DISTRIBUTION`
+- `NOMINAL_PERIOD`
+- `ENGINEERING_REQUIREMENT`
+- `SAME_CONDITION_CONTROL`
+- `PRE_FAULT_WITHIN_RUN`
+- `DECLARED_EXTERNAL_REFERENCE`
+
+No reference -> temporal observation only, not established degradation.
+
+### Three-dimensional degradation vector
+
+Define:
+
+`T_deg = {R, A, G}`
+
+- `R`: response-time variability;
+- `A`: data freshness/age;
+- `G`: update continuity/gap.
+
+For each relevant distribution save P50, P90, P95, P99, MAX, and IQR/MAD or another declared variability statistic.
+
+For full experiment reports, also publish `realtime_rag_summary.csv` with dimension, metric, source column, unit, semantics, group, total-run count, available-run count, and the declared tail statistics. Missing R/A/G components remain unavailable; do not silently omit them or substitute a different semantic quantity.
+
+Data age for a causally matched pair is:
 
 `A = t_effect - t_source`
 
-Specify whether `t_effect` is Planning, Control, or physical response. A record receipt timestamp is not automatically the source timestamp.
-
-### 4.3 Update continuity
+State whether the effect is Planning, Control, or physical response and whether source time is measurement/header/record time.
 
 For consecutive outputs:
 
 `G_k = t_out[k+1] - t_out[k]`
 
-Report the nominal period, p90/p99/max gap, and counts above a declared threshold such as `1.5 x` or `2 x` the nominal/median period. Keep the threshold definition stable across runs.
+Save nominal period, threshold, threshold provenance, count above threshold, and maximum gap. A single MAX outlier without reference/distribution is only a case-level anomaly. Repeated frames within a run are not independent experimental replicates.
 
-Useful parsed-record evidence includes topic-rate tables, module timelines, Planning/Control latency, Planning age, reuse count, sensor-to-control reaction/age, and abnormal-frame summaries.
+Record-derived Planning age/reuse, sensor-to-Control reaction/age, module latency, and topic gaps supplement L2. A record profile alone does not prove physical L3-L6 claims.
 
-## 5. Layer 3 - Cause-Effect Timing
+## 5. L3 — Cause-Effect Temporal Propagation
 
-Question: how did local timing symptoms propagate from environment input to vehicle action?
+### Hypothesis C3
+
+Timing degradation propagated along the relevant cause-effect chain from environment/sensor cause toward physical vehicle effect.
 
 Nominal chain:
 
-`Sensor -> Perception -> Prediction -> Planning -> Control -> Actuation`
+`Sensor -> Perception/Fusion -> Prediction -> Planning -> Control -> Bridge/Actuation -> Physical response`
 
-### 5.1 Physical Reaction Time
+Guardian is excluded from the executed command chain when the Bridge reads Control directly.
+
+### Physical reaction interval
 
 `T_R = t_e - t_c`
 
-In this workspace's established convention:
+For the established second-experiment endpoints:
 
-`T_e2e_data_observed_ms = (t2_wall_s - t1_wall_s) x 1000`
+`T_e2e_data_observed_ms = (t2_wall_s - t1_wall_s) * 1000`
 
-This includes the physical-response portion after the Control command. Do not replace it with sensor-to-Control timing.
+This is a system-level physical reaction interval and includes Control-to-physical-response time. Do not replace it with message-level sensor-to-Control latency.
 
-### 5.2 Data Age
+### Strict lineage
 
-`A = t_effect - t_source`
+Store event IDs and method:
 
-Reaction Time and Data Age answer different questions. A system may respond quickly using old data, or slowly using relatively fresh data. Analyze both when the evidence permits.
+- `source_event_id`
+- `perception_event_id`
+- `fusion_event_id`
+- `prediction_event_id`
+- `planning_event_id`
+- `control_event_id`
+- `actuation_event_id`
+- `causal_lineage_method`
+- `causal_lineage_grade`
 
-### 5.3 Stage decomposition
+Grades:
 
-Report causally matched stages rather than sums of unrelated percentiles:
+| Grade | Method | Claim ceiling |
+|---|---|---|
+| A | explicit trace ID/sequence/provenance lineage | C3 PASS eligible |
+| B | propagated source/header timestamp plus validated downstream mapping | C3 PASS eligible |
+| C | validated temporal alignment only | temporal association / PARTIAL_PASS |
+| D | nearest-time heuristic | UNCERTAIN |
+| UNKNOWN | insufficient evidence | NOT_TESTABLE |
 
-- sensor/source -> Fusion output;
-- Fusion -> Prediction;
-- Prediction -> Planning decision;
-- Planning -> Control command;
-- Control command -> physical response.
+P_CLOCK and P_TARGET are strong-C3 prerequisites. Stage decomposition must use causally matched events, not sums of unrelated percentiles.
 
-Use trace IDs, inherited header timestamps, sequence numbers, Planning references, or validated time alignment. Nearest-time matching alone is weak evidence and must be labeled accordingly.
+## 6. L4 — Temporal Correctness
 
-## 6. Layer 4 - Temporal Correctness
+### Hypothesis C4
 
-Question: did actual timing violate the maximum physically allowed response time?
+Observed physical Reaction Time exceeded an independently qualified scenario-dependent timing requirement.
 
-Let the current vehicle/scene state be:
+### Deadline classes
 
-`x(t) = [v, clearance, acceleration, braking capability, friction, safety margin, ...]`
+#### A. Retrospective physical deadline `tau_retro`
 
-Derive:
+Uses same-run post-outcome information such as full stopping behavior. It supports reconstruction/sensitivity only and cannot establish primary C4.
 
-`tau* = f(x(t_c))`
+#### B. Independent safety/engineering deadline `tau_req`
 
-Then compare:
+Uses state available before response/outcome plus a predeclared external requirement or independently calibrated/validated physical envelope. This is the only primary C4 deadline.
 
-`S_T = tau* - T_R`
+#### C. Model-predicted deadline `tau_model`
 
-- `S_T >= 0`: temporal requirement satisfied under the declared physical model/data-derived envelope;
-- `S_T < 0`: deadline miss;
-- `T_R > tau*`: equivalent miss condition.
+Mark `VALIDATED_MODEL` or `UNVALIDATED_MODEL`. An unvalidated/current-sample model yields `MODEL_SUPPORTED_ONLY`, not primary C4.
 
-### 6.1 Deadline provenance classes
+### Requirement registry
 
-Keep these distinct:
+For every requirement save:
 
-- `tau_data_derived`: derived from measured vehicle state and an observed/calibrated braking envelope; unavailable when the needed observed braking endpoint is missing.
-- `tau_model_predicted`: derived from a declared physical or empirical prediction model.
-- `tau_requirement`: externally specified safety or engineering requirement.
+- requirement ID/name/value;
+- provenance and derivation;
+- pre-registered status;
+- external/internal origin;
+- safety meaning (contact avoidance, engineering margin, etc.);
+- calibration/validation domain;
+- `tau_req_low`, center, high.
 
-Do not calculate `tau*` from `T_R` or choose it merely to separate safe and collision runs. When the measured braking capability came from the same delayed run, acknowledge the closed-loop dependence and add a sensitivity or baseline-calibrated deadline.
+A 6 m researcher-selected threshold is an engineering analysis margin unless external/pre-registered evidence makes it a safety requirement.
 
-## 7. Layer 5 - Temporal-to-Physical Propagation
+### Comparison
 
-Question: how much physical space did the timing behavior consume?
+`S_T = tau_req - T_R`
 
-### 7.1 Response distance
+- `T_R <= tau_req_low`: `CLEARLY_WITHIN_REQUIREMENT` (C4 failure hypothesis FAIL);
+- `tau_req_low < T_R <= tau_req_high`: `BOUNDARY_UNCERTAIN`;
+- `T_R > tau_req_high`: `CLEARLY_MISSED` (C4 PASS);
+- retro only: `RETROSPECTIVE_ONLY / NOT_TESTABLE`;
+- unvalidated model only: `MODEL_SUPPORTED_ONLY / NOT_TESTABLE`.
 
-`D_response = integral(t_c, t_e, v(t) dt_wall)`
+Never derive `tau_req` from `T_R` or choose it to separate collision labels.
 
-In the current workspace, the main field is:
+## 7. L5 — Temporal-to-Physical Propagation
 
-`D_delay_wall_integral_data_observed_m`
+### Hypothesis C5
 
-Compute with trapezoidal integration after interpolating the endpoints. Save Localization path/displacement and CARLA simulation diagnostics under distinct names.
+A qualified timing violation produced quantifiable additional physical-space consumption.
 
-### 7.2 Distance debt
+### Canonical response distance
 
-`t_d = t_c + tau*`
+`D_response = integral(t_c,t_e,v(t)dt_wall)`
 
-`D_debt = max(0, integral(t_d, t_e, v(t) dt_wall))`
+Canonical field:
 
-This is the incremental distance traveled after the time budget was exhausted. It is not automatically equal to the entire response distance.
+`D_response_wall_integral_data_observed_m`
 
-### 7.3 Total versus incremental space loss
+Compatibility alias:
 
-- Total remaining space at response: `D_brake_available = D_available - D_response`.
-- Incremental loss relative to an on-time deadline baseline: `D_debt`.
+`D_delay_wall_integral_data_observed_m` (deprecated)
 
-State which quantity is being plotted or compared. Do not subtract both from the same baseline unless the baseline definition explicitly calls for it.
+Interpolate endpoints and use trapezoidal wall-clock integration. CARLA frame/sim time, realtime factor, and Localization displacement/path are independent diagnostics, not substitutes.
 
-## 8. Layer 6 - Physical Safety
+### Qualified distance debt
 
-Question: what actual or predicted safety outcome followed?
+`t_d = t_c + tau_req`
 
-For an observed full stop:
+`D_debt = max(0, integral(t_d,t_e,v(t)dt_wall))`
 
-`M_collision_0m_data = D1_clear_data - D_response_data - D_brake_data`
+Primary debt is `REQUIREMENT_CONSTRAINED_DERIVED`: qualified `tau_req` plus observed compatible-clock velocity.
 
-For a required final safety clearance `D_safe`:
+- model deadline -> `D_debt_model_predicted_m` with `MODEL_TAINT`;
+- retrospective deadline -> `D_debt_retro_diagnostic_m` with `RETRO_TAINT`;
+- neither may be named directly observed primary debt.
+
+### Space-budget decomposition
+
+`M_D = D1 - D_response - D_brake - D_safe`
+
+Across runs:
+
+`Delta M_D = Delta D1 - Delta D_response - Delta D_brake`
+
+Decompose initial-space, response-distance, and braking-distance contributions when endpoint-compatible. If fault onset is before t1, separate:
+
+- Total Closed-loop Effect, which may include treatment-induced D1/v1 change;
+- Post-t1 Response Effect, based on t1-to-t2 behavior.
+
+Do not subtract total response distance and deadline-excess debt twice from the same baseline.
+
+For full experiment reports, emit a per-run observed space-budget table and an endpoint-compatible group comparison. Mark collision-truncated or outcome-conflicted runs unavailable/excluded for full-stop decomposition rather than estimating their unobserved stopping distance.
+
+## 8. L6 — Physical Safety Degradation
+
+### Hypothesis C6
+
+Physical safety margin and/or observed physical safety outcome degraded.
+
+### Continuous outcomes
+
+Preserve where available:
+
+- final/minimum clearance;
+- physical/contact/engineering margin;
+- minimum speed;
+- impact speed and impulse;
+- truncated braking distance/time;
+- strict stop and near stop;
+- outcome severity.
+
+For a full observed stop:
+
+`M_collision_0m_data = D1 - D_response - D_brake`
 
 `M_safety_data = M_collision_0m_data - D_safe`
 
-Interpretation:
+For collision runs, record direct collision, actor association, impact, and braking truncated to collision. Leave full observed stopping distance/full-stop margins unavailable.
 
-- positive margin: stopping is physically possible under the measured endpoint, though it may be near-critical;
-- near zero: safety-margin depletion;
-- negative: minimum-clearance violation is predicted/derived, but direct event evidence still determines whether an observed collision occurred.
+### Outcome taxonomy
 
-For collision runs:
+Use `SAFE_STOP`, `LOW_MARGIN_STOP`, `CRITICAL_STOP`, `NEAR_MISS`, `CONTACT`, `COLLISION`, `HIGH_SEVERITY_COLLISION`, or `UNCERTAIN`. Any low/critical/near/high-severity threshold requires provenance. Do not invent a threshold after seeing outcomes.
 
-- record collision occurrence, target association, impact speed, impulse, and braking distance truncated to collision as observed fields;
-- leave full observed stopping distance and full-stop margin unavailable;
-- place any reconstructed stopping distance, restored-response outcome, or impact prediction in the model table.
+Direct collision proves outcome, not temporal cause.
 
-## 9. Cyber-physical feedback
+## 9. C7 — Temporal Safety Attribution
 
-Timing degradation can change state and tighten the next deadline:
+C7 is evaluated after C1-C6, not displayed as a seventh layer. Consider:
 
-`Reaction Time up -> D_response up -> clearance down -> tau*(x) down`
+- intervention fidelity and location;
+- P_CLOCK/P_TARGET/P_FUNC/P_DEADLINE;
+- initial clearance/speed causal role;
+- braking capability and dynamics;
+- freshness/update gap/solver fallback;
+- phase quantization;
+- geometry and outcome conflict;
+- model/retrospective taint;
+- dose-response design and repeatability.
 
-This feedback is a reason to evaluate deadlines from a clearly specified state and to avoid treating a run-specific, post-delay braking state as an entirely independent requirement without qualification.
+Use the Claim Strength Contract. A Bridge injection can demonstrate response to an imposed fault but does not establish an intrinsic Apollo defect.
 
-## 10. Cross-run comparison rules
+## 10. Cross-run and feedback rules
 
-Use identical definitions across every compared run:
+Use identical clocks, endpoints, integration, geometry, safety-margin semantics, and missing-value rules across compared runs. Show every run before aggregates and keep excluded/unavailable counts.
 
-- same clock basis;
-- same `t1` and `t2` detection rules;
-- same speed interpolation and trapezoidal integration;
-- same target geometry convention;
-- same safety-clearance convention;
-- same missing-value rules;
-- same observed/model separation.
+Cyber-physical feedback can tighten later requirements:
 
-Report run-level rows before group aggregates. Group counts must include unavailable and excluded runs transparently, not only successfully parsed cases.
+`Reaction Time up -> D_response up -> clearance down -> tau_req(x) down`
 
-## 11. Minimum causal conclusion chain
+If the fault began before t1, D1/v1 can be part of that feedback. Classify their causal role before calling them confounders.
 
-A strong conclusion names evidence for all links:
-
-1. the temporal intervention actually occurred;
-2. internal timing symptoms changed;
-3. end-to-end physical response changed;
-4. the response exceeded or approached an independently defined deadline;
-5. additional response time became measured distance consumption;
-6. braking margin and the observed outcome changed;
-7. important competing explanations were checked.
+With baseline plus one nonzero delay level, report only an observed incremental end-to-end response ratio. Stable propagation gain requires multiple nonzero levels, repeats, controlled state, uncertainty estimates, and an approximately stable dose response.
