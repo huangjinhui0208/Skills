@@ -1,27 +1,33 @@
 ---
 name: autonomous-driving-temporal-safety-analysis
-description: Apply TCPS-PA v2, an evidence-constrained Claim–Evidence diagnostic protocol, to CARLA/Apollo autonomous-driving experiments and parsed Apollo cyber records. Use for delay, jitter, backlog, staleness, update gaps, physical reaction time, dynamic deadlines, timing slack, response distance, distance debt, braking margin, near miss, collision attribution, bridge injection, Trace/log/record fusion, six-layer reports, real-time-systems engineering reports, paper-method instantiation, or audits of whether evidence is strong enough to support a timing-safety conclusion. It keeps observed, retrospective, requirement-qualified, and model-supported results separate and rejects methodologically invalid but format-complete six-layer narratives.
+description: Apply TCPS-PA v2.1, an evidence-constrained bidirectional Claim–Evidence diagnostic protocol, to CARLA/Apollo autonomous-driving experiments and parsed Apollo cyber records. Use for injected-fault forward propagation, non-injected temporal-defect diagnosis, delay, jitter, backlog, staleness, update gaps, physical reaction time, dynamic physical deadline construction, timing slack, response distance, validator-recomputed distance debt/space budget, braking margin, clock alignment, periodic phase effects, near miss, collision attribution, bridge injection, Trace/log/record fusion, six-layer reports, real-time-systems engineering reports, paper-method instantiation, or audits of whether evidence is strong enough to support a timing-safety conclusion. It keeps observed, retrospective, requirement-qualified, and model-supported results separate and rejects methodologically invalid but format-complete narratives.
 ---
 
-# TCPS-PA Diagnostic Protocol v2
+# TCPS-PA Diagnostic Protocol v2.1
 
 This skill is not primarily a report-generation workflow. It is an evidence-constrained diagnostic protocol for Temporal Correctness-to-Physical Safety Propagation Analysis.
 
-Use the operational sequence:
+Use two explicitly different operational sequences:
 
-`Detect -> Characterize -> Trace -> Judge -> Quantify -> Attribute`
+- forward fault-injection mode: `L1 Detect -> L2 Characterize -> L3 Trace -> L4 Judge -> L5 Quantify -> L6 Outcome -> C7 Attribute`;
+- backward temporal-defect diagnosis mode: `L4 and/or L6 seed observation -> L3 lineage -> L2 symptom localization -> L1 source hypotheses -> discriminating tests`.
+
+Backward traversal generates ranked, falsifiable hypotheses. It never reverses a forward implication into proof of root cause.
 
 Do not infer a six-layer story merely because every layer has a metric. Build and validate the Claim–Evidence argument before writing prose.
 
 ## Read before analysis
 
-Read all five contracts before constructing claims:
+Read all six contracts before constructing claims:
 
 1. [references/six-layer-method.md](references/six-layer-method.md) for domain quantities and layer hypotheses.
 2. [references/data-contract.md](references/data-contract.md) for source semantics, clocks, record exports, and missing-data rules.
 3. [references/inference-contract.md](references/inference-contract.md) for Claim Graph, admissibility, taint, prerequisites, defeaters, and inference gates.
 4. [references/claim-strength-contract.md](references/claim-strength-contract.md) for conclusion ceilings and legal language.
 5. [references/report-contract.md](references/report-contract.md) for ledgers, audit tables, report structure, and deliverables.
+6. [references/dynamic-deadline-contract.md](references/dynamic-deadline-contract.md) before constructing or qualifying any state-dependent physical deadline.
+
+Read [references/research-foundations.md](references/research-foundations.md) when explaining the scientific basis, extending the protocol, or comparing it with RSS, reachability, runtime monitoring, STPA/CAST, real-time DAG analysis, or clock-synchronization practice.
 
 ## Non-negotiable rules
 
@@ -44,6 +50,10 @@ Read all five contracts before constructing claims:
 17. Preserve the deployed architecture: the Bridge reads Control directly when Guardian commands are not sent to it.
 18. Treat a full experiment report as three deliverables at once: a real-time-systems engineering analysis, an explicit six-layer method instantiation, and a reproducible future-paper method record. Keep their completion claims separate.
 19. Use the user's requested report language for the main narrative. In a Chinese report, keep headings, explanations, conclusions, limitations, and table descriptions in Chinese; retain English only for canonical IDs, field names, formulas, paths, and standard verdict enums.
+20. Keep forward confirmation and backward diagnosis separate. A downstream miss/collision may seed an upstream hypothesis; it cannot by itself establish the upstream fault, Apollo-intrinsic origin, or uniqueness.
+21. Separate `P_CLOCK` from `P_PHASE`. `P_CLOCK` qualifies timestamp comparability and uncertainty. `P_PHASE` qualifies periodic sampling/tick phase hypotheses. An untested phase cannot make an otherwise valid same-clock interval invalid, and a synchronized clock cannot establish phase causation.
+22. A constructed dynamic physical deadline is eligible only when its state was available by `t1`, its vehicle/target dynamics and braking envelope are prospective and independently sourced or validated, uncertainty bounds are explicit, and the construction audit is reproducible.
+23. For L5, validator recomputation from the observed wall-clock velocity samples is authoritative. A precomputed evidence class or scalar alone cannot establish `D_response`, primary `D_debt`, or space-budget arithmetic.
 
 ## Mandatory workflow
 
@@ -69,7 +79,7 @@ Record association must be audited and left-joined. Do not attach another experi
 
 ### 2. Build event, clock, target, and fault dictionaries
 
-Define `t_c/t1`, module events, `t_e/t2`, requirements, deadlines, stops/collisions, clock domains, target identity, and the Temporal Fault Signature `F_T`. If `fault_onset < t1`, create `pre_hazard_state_audit.csv` before treating D1 or v1 as a confounder.
+Define `t_c/t1`, module events, `t_e/t2`, requirements, deadlines, stops/collisions, clock domains, periodic phases, target identity, and the Temporal Fault Signature `F_T`. If `fault_onset < t1`, create `pre_hazard_state_audit.csv` before treating D1 or v1 as a confounder. Write separate `clock_alignment_audit.csv` and `phase_audit.csv`; keep `clock_phase_audit.csv` only as a legacy compatibility view.
 
 ### 3. Build ledgers before claims
 
@@ -78,13 +88,15 @@ Create:
 - `evidence_ledger.csv` with evidence class, source, clock, confidence, limitations, and claim links;
 - `temporal_fault_signature.csv`;
 - `clock_phase_audit.csv`, `functional_correctness_audit.csv`, and target/deadline qualification evidence;
+- `dynamic_deadline_construction.csv`, `velocity_trajectory_observed.csv`, and `l5_recomputation.csv`;
+- `diagnosis_hypothesis_ledger.csv` and `diagnosis_edges.csv`, even when diagnosis mode is only `NOT_TESTABLE`;
 - `defeater_ledger.csv` with default and experiment-specific defeaters.
 
 Do not draft layer conclusions yet.
 
 ### 4. Build prerequisite claims and Claim Graph
 
-Evaluate `P_CLOCK`, `P_TARGET`, `P_FUNC`, and `P_DEADLINE`. Then evaluate `C1` through `C6`; evaluate attribution `C7` only after the six layer claims. Store exact dependencies in `claim_edges.csv` and full gate records in `claim_ledger.csv`.
+Evaluate `P_CLOCK`, `P_PHASE`, `P_TARGET`, `P_FUNC`, and `P_DEADLINE`. Then evaluate `C1` through `C6`; evaluate attribution `C7` only after the six layer claims. Store exact dependencies in `claim_edges.csv` and full gate records in `claim_ledger.csv`.
 
 Each gate must contain an executable `I-M-E-C-O-N` record:
 
@@ -114,9 +126,19 @@ Use [references/inference-contract.md](references/inference-contract.md). In par
 - **L2 / C2:** establish degradation only against a declared reference and distribution; summarize Reaction, Age, and Gap with per-run availability plus P50/P90/P95/P99/MAX and IQR/MAD.
 - **L3 / C3:** separate physical reaction interval from strict causal lineage and apply P_CLOCK/P_TARGET ceilings.
 - **L4 / C4:** compare observed `T_R` only with a qualified prospective `tau_req`; keep `tau_retro` and `tau_model` separate.
-- **L5 / C5:** separate total response distance, qualified deadline-excess debt, retro/model diagnostics, and endpoint-compatible space-budget contributions. Keep collision-truncated runs out of full-stop decompositions.
+- **L4 / C4:** when constructing rather than importing `tau_req`, execute the Dynamic Physical Deadline Construction Contract and preserve low/center/high bounds, construction status, braking-envelope provenance, and validation domain.
+- **L5 / C5:** separate total response distance, qualified deadline-excess debt, retro/model diagnostics, and endpoint-compatible space-budget contributions. Run `recompute_l5_metrics.py`; keep collision-truncated runs out of full-stop decompositions.
 - **L6 / C6:** report continuous safety degradation and direct outcome evidence with threshold provenance.
 - **Attribution / C7:** evaluate functional, initial-state, physical, freshness, phase, geometry, and outcome-conflict alternatives.
+
+Then, if a L4 miss or L6 physical degradation is observed, run backward diagnosis:
+
+```bash
+python3 <skill-dir>/scripts/build_temporal_diagnosis.py \
+  --analysis-dir <analysis-dir>
+```
+
+Trace only admissible reverse edges (`SEEDS_DIAGNOSIS`, `CONSISTENT_WITH`, `CHALLENGED_BY`, `DISCRIMINATES`). Report candidate set, diagnosability, missing discriminators, and next test. Do not use `PROVES` or silently rewrite a candidate as C1 PASS.
 
 ### 7. Generate prose from Claim Ledger
 
@@ -177,7 +199,11 @@ Complete the task only when:
 - prerequisite claims, C1-C7, edges, and defeaters are explicit;
 - layer gates reflect evidence eligibility rather than metric presence;
 - C1-C7 have nonempty `I-M-E-C-O-N` gate fields and an explicit next-gate condition;
+- both forward and backward artifacts are present, with reverse diagnosis kept hypothesis-generating and falsifiable;
+- `P_CLOCK` and `P_PHASE` are separate scoped claims backed by separate audits;
+- every constructed dynamic deadline passes its construction contract or remains unqualified;
 - response distance uses wall-clock integration and distance debt carries its requirement/model/retro provenance;
+- validator recomputes L5 from `velocity_trajectory_observed.csv`, `t1`, `t_d`, and `t_e`, and reconciles space-budget arithmetic within declared tolerance;
 - collision right-censoring and observed/model separation hold;
 - a full experiment report includes R/A/G tail statistics, endpoint-compatible space-budget tables, and a method-completeness matrix;
 - the report explicitly separates structural method instantiation from empirically unclosed evidence bridges;

@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +20,8 @@ from inference_core import (  # noqa: E402
     temporal_correctness_classification,
     validate_argument_rows,
 )
+from construct_dynamic_deadline import construct_row  # noqa: E402
+from recompute_l5_metrics import recompute_analysis  # noqa: E402
 
 
 def evidence(evidence_id: str, klass: str, metric: str, supports: str, **extra: str) -> dict[str, str]:
@@ -198,6 +203,149 @@ class SyntheticInferenceCases(unittest.TestCase):
         c2 = claim("C2.group", "PARTIAL_PASS", gate_criterion="", next_gate_condition="")
         issue_rules = rules(validate_argument_rows([c2], [], [], []))
         self.assertIn("GATE_COMPLETENESS", issue_rules)
+
+    def test_v21_clock_pass_does_not_require_phase_scan(self) -> None:
+        p_clock = claim("P_CLOCK.run", "PASS", "EV.CLOCK")
+        ev = evidence(
+            "EV.CLOCK", "DIRECT_OBSERVED", "cross_host_clock_bound", "P_CLOCK.run",
+            semantic_role="CLOCK_ALIGNMENT_BOUND",
+        )
+        clock_audit = [{
+            "run_id_or_group": "run", "sync_method": "PTP_802_1AS",
+            "offset_estimate_ms": "0.2", "drift_estimate_ppm": "2",
+            "alignment_residual_ms": "0.3", "timestamp_resolution_ms": "0.001",
+            "confidence": "HIGH",
+        }]
+        issue_rules = rules(validate_argument_rows(
+            [p_clock], [ev], [], [], clock_rows=clock_audit, phase_rows=[]
+        ))
+        self.assertNotIn("V8", issue_rules)
+
+    def test_v21_phase_pass_requires_active_scan(self) -> None:
+        p_phase = claim("P_PHASE.run", "PASS")
+        self.assertIn(
+            "V19",
+            rules(validate_argument_rows([p_phase], [], [], [], phase_rows=[])),
+        )
+
+    def test_v21_dynamic_deadline_contract_constructs_ordered_bounds(self) -> None:
+        parameters = {
+            "construction_id": "CONSTRUCTION.run", "requirement_id": "REQ.run",
+            "run_id_or_group": "run", "state_time": "1.0",
+            "state_time_basis": "wall_epoch_s", "state_available_by_t1": "TRUE",
+            "input_cutoff_time": "1.0", "latest_input_time": "1.0",
+            "parameter_selection_time": "0.5", "parameter_selection_locked_by_t1": "TRUE",
+            "current_run_post_t1_data_used": "FALSE", "current_run_outcome_used": "FALSE",
+            "d_clear_m": "60", "v_ego_mps": "12", "v_front_mps": "0",
+            "d_safe_m": "6", "a_ego_response_max_mps2": "0.5",
+            "b_ego_min_mps2": "4", "b_front_max_mps2": "8",
+            "braking_envelope_id": "BE.1", "braking_envelope_provenance": "independent calibration",
+            "braking_envelope_status": "QUALIFIED", "validation_dataset_independent": "TRUE",
+            "validation_scope": "dry asphalt 8-14 m/s",
+            "calibration_run_ids": "cal-1|cal-2", "evaluation_run_ids": "run",
+            "target_motion_assumption": "stationary obstacle",
+            "road_condition_assumption": "dry asphalt",
+        }
+        bounds = {
+            "d_clear_m": [59, 61], "v_ego_mps": [11.8, 12.2], "v_front_mps": [0, 0],
+            "d_safe_m": [5.5, 6.5], "a_ego_response_max_mps2": [0.4, 0.6],
+            "b_ego_min_mps2": [3.8, 4.2], "b_front_max_mps2": [7.5, 8.5],
+        }
+        parameters["parameter_bounds_json"] = json.dumps(bounds)
+        parameters["input_provenance_json"] = json.dumps({name: "calibration.csv:row1" for name in bounds})
+        built = construct_row(parameters)
+        self.assertEqual(built["qualification"], "QUALIFIED_DYNAMIC_PHYSICAL")
+        self.assertLessEqual(float(built["tau_req_low_ms"]), float(built["tau_req_center_ms"]))
+        self.assertLessEqual(float(built["tau_req_center_ms"]), float(built["tau_req_high_ms"]))
+
+    def test_v21_qualified_dynamic_deadline_requires_matching_construction(self) -> None:
+        requirement = {
+            "requirement_id": "REQ.run", "run_id_or_group": "run",
+            "deadline_type": "DYNAMIC_PHYSICAL_CONSTRUCTED",
+            "p_deadline_qualification": "QUALIFIED_DYNAMIC_PHYSICAL",
+            "tau_req_low_ms": "400", "tau_req_center_ms": "500", "tau_req_high_ms": "600",
+        }
+        self.assertIn(
+            "V17",
+            rules(validate_argument_rows([], [], [], [], requirement_rows=[requirement])),
+        )
+
+    def test_v21_l5_recomputation_from_raw_velocity_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tables = root / "tables"
+            tables.mkdir()
+
+            def write(name: str, fields: list[str], rows: list[dict[str, str]]) -> None:
+                with (tables / name).open("w", encoding="utf-8", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields)
+                    writer.writeheader()
+                    writer.writerows(rows)
+
+            write(
+                "run_level_observed.csv",
+                ["run_id", "t1_wall_s", "t2_wall_s", "D_response_wall_integral_data_observed_m",
+                 "D_debt_requirement_constrained_derived_m"],
+                [{"run_id": "run", "t1_wall_s": "1", "t2_wall_s": "3",
+                  "D_response_wall_integral_data_observed_m": "20",
+                  "D_debt_requirement_constrained_derived_m": "10"}],
+            )
+            write(
+                "velocity_trajectory_observed.csv",
+                ["run_id", "sample_index", "t_wall_s", "speed_mps", "availability"],
+                [{"run_id": "run", "sample_index": str(index), "t_wall_s": str(index),
+                  "speed_mps": "10", "availability": "AVAILABLE"} for index in range(4)],
+            )
+            write(
+                "requirement_registry.csv",
+                ["requirement_id", "run_id_or_group", "p_deadline_qualification", "tau_req_center_ms"],
+                [{"requirement_id": "REQ.run", "run_id_or_group": "run",
+                  "p_deadline_qualification": "QUALIFIED_INDEPENDENT", "tau_req_center_ms": "1000"}],
+            )
+            result = recompute_analysis(root, tolerance_m=1e-9, write_output=False)[0]
+            self.assertEqual(result["recomputation_status"], "PASS")
+            self.assertAlmostEqual(float(result["D_response_recomputed_m"]), 20.0)
+            self.assertAlmostEqual(float(result["D_debt_recomputed_m"]), 10.0)
+
+    def test_v21_c5_rejects_claimed_debt_not_matching_validator_result(self) -> None:
+        c4 = claim("C4.run", "PASS")
+        p_clock = claim("P_CLOCK.run", "PASS")
+        c5 = claim("C5.run", "PASS", "EV.DEBT|EV.V", "C4.run|P_CLOCK.run")
+        evs = [
+            evidence(
+                "EV.DEBT", "REQUIREMENT_CONSTRAINED_DERIVED", "D_DEBT", "C5.run",
+                value="11", unit="m", run_id="run", semantic_role="DEADLINE_EXCESS_DISTANCE_DEBT",
+            ),
+            evidence(
+                "EV.V", "DIRECT_OBSERVED", "VELOCITY_TRAJECTORY", "C5.run",
+                value="trajectory", unit="m/s", run_id="run", semantic_role="OBSERVED_VELOCITY_PATH",
+            ),
+        ]
+        l5 = [{
+            "run_id": "run", "D_debt_recomputed_m": "10", "tolerance_m": "0.02",
+            "recomputation_status": "PASS",
+        }]
+        issue_rules = rules(validate_argument_rows(
+            [c4, p_clock, c5], evs, edges_for([c4, p_clock, c5]), [], l5_rows=l5
+        ))
+        self.assertIn("V18", issue_rules)
+
+    def test_v21_backward_diagnosis_cannot_use_proves_edge(self) -> None:
+        diagnosis = [{
+            "hypothesis_id": "H.1", "seed_claim_id": "C6.run",
+            "status": "CONSISTENT_BUT_UNRESOLVED", "alternative_hypothesis_ids": "H.2",
+        }]
+        diagnosis_edges = [{
+            "parent_id": "C6.run", "child_id": "H.1", "relation": "PROVES",
+            "time_direction": "BACKWARD_DIAGNOSTIC",
+        }]
+        self.assertIn(
+            "V20",
+            rules(validate_argument_rows(
+                [claim("C6.run", "PARTIAL_PASS")], [], [], [],
+                diagnosis_rows=diagnosis, diagnosis_edges=diagnosis_edges,
+            )),
+        )
 
 
 if __name__ == "__main__":
