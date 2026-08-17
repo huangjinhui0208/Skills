@@ -164,13 +164,17 @@ Before using `effect - source`:
 4. save the matching key/sequence/trace provenance;
 5. state whether the result is source age, publication latency, receipt latency, or physical reaction time.
 
-### 4.1 Clock and phase audit
+### 4.1 Clock alignment audit
 
-Create `clock_phase_audit.csv` with `clock_domain`, host, timestamp type, synchronization/anchor method, offset estimate, drift estimate, alignment residual, timestamp resolution, and confidence. A single-domain wall interval may remain valid even when cross-host stage decomposition is not.
+Create `clock_alignment_audit.csv` with clock domain, host, timestamp type, synchronization/anchor method, offset estimate, drift/frequency estimate, alignment residual, timestamp resolution/precision, jitter/dispersion, error budget, and confidence. A single-domain wall interval may remain valid even when cross-host stage decomposition is not.
 
-Record CARLA fixed step and Control/Planning/Localization periods plus phase-to-tick values when available. Discrete 300/400/700/800/900 ms clusters without an active phase scan are `PHASE_EFFECT_HYPOTHESIS`, not established phase causation.
+Do not place phase verdicts in this table. `clock_phase_audit.csv` may remain as a legacy view, but it cannot qualify P_CLOCK or P_PHASE by itself in a new analysis.
 
-### 4.2 Causal-lineage extraction
+### 4.2 Periodic phase audit
+
+Create `phase_audit.csv`. Record CARLA fixed step/tick origin, sensor tick, Apollo module timer periods/origins, injection onset phase, phase-to-tick and phase-to-consumer values, scan design/levels/repeats, and effect/uncertainty. Discrete 300/400/700/800/900 ms clusters without an active phase scan are `PHASE_EFFECT_HYPOTHESIS`, not established phase causation.
+
+### 4.3 Causal-lineage extraction
 
 For each claimed chain, retain source/Fusion/Prediction/Planning/Control/actuation event IDs, matching keys, method, and grade A/B/C/D/UNKNOWN. A physical `T_R` can be valid as a wall-clock interval while strict lineage remains grade C or lower.
 
@@ -208,6 +212,24 @@ Keep three sources separate:
 - `tau_retro`: same-run post-outcome reconstruction;
 - `tau_req`: independently qualified prospective requirement;
 - `tau_model`: model prediction with validation class.
+
+If `tau_req` is dynamically constructed, also create `dynamic_deadline_construction.csv` under [dynamic-deadline-contract.md](dynamic-deadline-contract.md). The construction row, registry row, and evidence row must share the exact `requirement_id`.
+
+## 5.3 Observed velocity trajectory for L5 recomputation
+
+Create `velocity_trajectory_observed.csv` from Localization/Chassis samples with at least:
+
+- `run_id`, `sample_index`, `t_wall_s`, `speed_mps`;
+- `clock_domain`, `source_file`, `source_locator`;
+- `availability`, `quality_flags`.
+
+Use wall epoch and speed magnitude (or a declared signed longitudinal speed when the geometry requires it). Sort by time, reject duplicate/nonmonotonic samples unless explicitly resolved, and preserve samples bracketing `t1`, `t_d`, and `t_e`. Endpoint interpolation is linear; integration is trapezoidal.
+
+The validator writes `l5_recomputation.csv`. Do not manually mark its status PASS.
+
+## 5.4 Backward diagnosis inputs
+
+Create `diagnosis_hypothesis_ledger.csv` and `diagnosis_edges.csv`. Candidate hypotheses may point to raw/derived evidence and forward claims but cannot alter them. Preserve candidates with missing evidence as `NOT_TESTABLE`; do not discard them merely to force unique diagnosis.
 
 ## 6. Current second-experiment schema example
 

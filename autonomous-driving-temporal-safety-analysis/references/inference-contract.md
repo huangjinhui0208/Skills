@@ -19,9 +19,15 @@
 
 TCPS-PA v2 is a lightweight scientific inference layer, not a certification or full SACM/GSN assurance-case system. It constrains what may be inferred from experimental evidence.
 
-Execute:
+Forward execution:
 
 `Raw Data -> Evidence Extraction -> Evidence Typing -> Claim Construction -> Prerequisite Checking -> Inference Rule Evaluation -> Counter-evidence/Defeater Evaluation -> Confidence Propagation -> Six-layer Verdict -> Allowed Claim Strength -> Report`
+
+Backward diagnosis executes separately:
+
+`Observed C4/L6 seed -> Reverse diagnostic graph -> Upstream candidates -> Consistency/challenge tests -> Diagnosability/equivalence classes -> Discriminating next tests`
+
+Reverse traversal does not add forward `REQUIRES` edges and does not change a claim verdict merely because a downstream observation exists.
 
 Metric availability is never sufficient for a claim. Every claim must name evidence, prerequisites, rule, challenges, defeaters, confidence ceiling, residual uncertainty, and allowed language.
 
@@ -32,6 +38,7 @@ Metric availability is never sufficient for a claim. Every claim must name evide
 | ID | Proposition | Strong-pass requirement |
 |---|---|---|
 | `P_CLOCK` | Clocks used by a comparison are compatible and aligned to the claimed precision. | Clock domains, synchronization/anchor method, offset/drift or residual, resolution, and bounded error are documented. |
+| `P_PHASE` | Periodic producers, consumers, simulator ticks, and injection onset are phase-equivalent or their phase sensitivity is characterized. | Periods, phase origins, phase-to-tick values, scan design, and effect estimates/uncertainty are documented. |
 | `P_TARGET` | Sensor, Fusion, Prediction, Planning, Control response, and collision actor refer to the relevant physical target. | Trace/identity chain is explicit and contradictions are resolved or bounded. |
 | `P_FUNC` | Relevant functional behavior has been qualified and does not independently explain the outcome. | Perception, Prediction, Planning, Control, Bridge, and physical-response audit yields `QUALIFIED_PASS`. |
 | `P_DEADLINE` | The timing requirement is independent, prospective, scenario-compatible, and qualified. | Requirement provenance and uncertainty are declared; no current-run post-outcome information is critical to the primary requirement. |
@@ -170,6 +177,19 @@ Maintain requirement provenance:
 
 Record `requirement_id`, name/value, provenance, pre-registration, external/internal status, safety meaning, uncertainty bounds, and validation scope.
 
+Constructed state-dependent deadlines must also pass [dynamic-deadline-contract.md](dynamic-deadline-contract.md) and have an exact qualified `dynamic_deadline_construction.csv` row. A requirement-registry label alone is insufficient.
+
+### 5.5 P_PHASE
+
+Create `phase_audit.csv`. Evaluate source/sensor period, Fusion/Prediction/Planning/Control timer period, CARLA `fixed_delta_seconds`, phase origin, injection phase, and sample-and-hold/tick relationship.
+
+- `PASS`: equivalent by design or an active scan bounds phase effect below the claimed effect;
+- `PARTIAL_PASS`: phase is measured but coverage/effect uncertainty is incomplete;
+- `FAIL`: phase differs enough to invalidate the intended comparison;
+- `NOT_TESTABLE`: period/origin/scan evidence is unavailable.
+
+Do not put clock offset/drift into P_PHASE, and do not require phase evidence to pass P_CLOCK.
+
 ## 6. Claim inference rules
 
 ### IR-C1 — Temporal Disturbance Verified
@@ -218,6 +238,8 @@ Canonical quantities:
 
 Primary C5 requires established/qualified C4, observed compatible-clock velocity path, and `REQUIREMENT_CONSTRAINED_DERIVED` debt. Model deadline -> `D_debt_model` with model taint. Retrospective deadline -> `D_debt_retro_diagnostic`. Neither may be relabeled observed primary debt.
 
+Strong C5 additionally requires validator recomputation from available per-sample `velocity_trajectory_observed.csv` rows. The validator must reproduce `D_response`, `D_debt`, and applicable space-budget arithmetic within declared tolerances and verify endpoint coverage/interpolation. A self-reported evidence class, scalar value, or taint tag cannot substitute for sample ancestry.
+
 Decompose:
 
 `M_D = D1 - D_response - D_brake - D_safe`
@@ -235,6 +257,12 @@ C6 strong evidence must be `DIRECT_OBSERVED`, carry `semantic_role=PHYSICAL_OUTC
 ### IR-C7 — Temporal Safety Attribution
 
 Require the strongest available chain across C1-C6, P_FUNC, and defeater resolution. Attribution strength is capped by weak C4/C5, unresolved functional alternatives, post-treatment initial state, or physical/geometry differences. An injected Bridge fault cannot establish an SUT-intrinsic defect.
+
+### IR-DIAG — Backward Temporal-Defect Diagnosis
+
+Allow C4 miss or C6 physical loss as a diagnosis seed. Reverse edges may state only `SEEDS_DIAGNOSIS`, `CONSISTENT_WITH`, `CHALLENGED_BY`, or `DISCRIMINATES`. A candidate is isolated only if it has an admissible time-respecting upstream path, required clocks/targets are qualified, observationally equivalent alternatives are refuted/bounded, and external injection, clock, phase, functional, and physical alternatives are evaluated.
+
+Backward analysis never licenses `downstream seed -> C1 PASS`, `collision -> deadline miss`, or `deadline miss -> intrinsic Apollo defect`.
 
 ## 7. Evidence taint and confidence propagation
 
@@ -324,9 +352,17 @@ Create `pre_hazard_state_audit.csv` over `[t_fault,t1]` using position, velocity
 
 Presence is not correctness. Use the P_FUNC audit and preserve fallback/infeasibility as potential functional defeaters.
 
-### 10.4 Clock and phase
+### 10.4 Clock
 
-Record clock domain/host/timestamp type/sync/offset/drift/residual/resolution. Phase clusters without an active phase scan remain `PHASE_EFFECT_HYPOTHESIS`, never `PHASE_EFFECT_ESTABLISHED`.
+Write `clock_alignment_audit.csv`. Record clock domain/host/timestamp type/sync/offset/drift/residual/resolution/dispersion/jitter/error budget. Judge timestamp comparability only.
+
+### 10.5 Phase
+
+Write `phase_audit.csv`. Record periodic sources/consumers, periods, phase origins, injection phase, CARLA tick/fixed step, scan levels/repeats, effect and uncertainty. Phase clusters without an active phase scan remain `PHASE_EFFECT_HYPOTHESIS`, never `PHASE_EFFECT_ESTABLISHED`.
+
+### 10.6 Backward diagnosis
+
+Write `diagnosis_hypothesis_ledger.csv` and `diagnosis_edges.csv`. Every non-refuted candidate needs a seed, symptom/segment path, supporting/challenging evidence, alternatives, diagnosability class, and a discriminating next test.
 
 ## 11. Argument-validator rules
 
@@ -339,6 +375,10 @@ The semantic validator must enforce:
 - status-matrix rows consistent with the Claim Ledger, not merely the presence of a matrix heading;
 - nonempty I-M-E-C-O-N gate fields for every C1-C7 record in a full experiment analysis;
 - full-report engineering artifacts for R/A/G tail statistics, endpoint-compatible observed space budgets, and method-completeness status;
+- separate P_CLOCK/P_PHASE claims and separate clock/phase audits;
+- dynamic-deadline construction qualification and anti-leakage checks;
+- L5 numerical recomputation from observed sample trajectories;
+- reverse-diagnosis edge legality, candidate/seed completeness, and no reverse upgrade of forward claims;
 
 - `V1`: C4 PASS requires qualified P_DEADLINE and observed T_R.
 - `V2`: only `tau_retro` -> C4 cannot PASS/FAIL; use RETROSPECTIVE_ONLY/NOT_TESTABLE.
@@ -356,6 +396,10 @@ The semantic validator must enforce:
 - `V14`: observed collision does not imply temporal failure.
 - `V15`: collision run cannot claim fabricated full observed braking distance.
 - `V16`: critical OPEN/UNKNOWN defeater caps claim at UNCERTAIN/PARTIAL_PASS.
+- `V17`: constructed `tau_req` without a qualified same-scope construction audit cannot establish P_DEADLINE/C4.
+- `V18`: C5 PASS requires successful validator recomputation of response distance, deadline-excess debt, and applicable space budget.
+- `V19`: P_CLOCK cannot depend on phase verdict; P_PHASE cannot be inferred from clock synchronization.
+- `V20`: a downstream diagnosis seed cannot directly prove an upstream fault; illegal reverse edges or isolated candidates without discriminator closure fail.
 
 ## 12. Forbidden inference patterns
 
@@ -375,3 +419,8 @@ Reject or downgrade:
 - Bridge-injected fault -> SUT-intrinsic defect;
 - UNKNOWN -> PASS;
 - strong C1+C6 -> conceal weak/not-testable C4+C5.
+- synchronized clocks -> phase effect established;
+- phase scan absent -> same-clock wall interval invalid;
+- L4 miss or L6 collision -> upstream temporal source proven;
+- diagnosis ranking -> unique root cause;
+- self-reported C5 scalar/evidence class -> numerically valid distance debt.

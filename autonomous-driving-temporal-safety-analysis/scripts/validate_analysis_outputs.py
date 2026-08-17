@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate TCPS-PA v2 artifacts as both schemas and scientific arguments."""
+"""Validate TCPS-PA v2.1 artifacts as schemas, computations, and arguments."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Set, Tuple
 
 from inference_core import claim_audit_markdown, validate_argument_rows
+from construct_dynamic_deadline import construct_row
+from recompute_l5_metrics import recompute_analysis
 
 
 REQUIRED_FILES = {
@@ -24,7 +26,13 @@ REQUIRED_FILES = {
     "tables/temporal_fault_signature.csv",
     "tables/pre_hazard_state_audit.csv",
     "tables/functional_correctness_audit.csv",
-    "tables/clock_phase_audit.csv",
+    "tables/clock_alignment_audit.csv",
+    "tables/phase_audit.csv",
+    "tables/dynamic_deadline_construction.csv",
+    "tables/velocity_trajectory_observed.csv",
+    "tables/l5_recomputation.csv",
+    "tables/diagnosis_hypothesis_ledger.csv",
+    "tables/diagnosis_edges.csv",
     "tables/requirement_registry.csv",
     "tables/event_timeline.csv",
     "tables/stage_timing_and_freshness.csv",
@@ -95,11 +103,59 @@ SCHEMAS: Dict[str, Set[str]] = {
         "bridge_payload_applied", "physical_response_observed", "p_func_verdict",
         "confidence", "source_evidence_ids", "notes",
     },
-    "tables/clock_phase_audit.csv": {
+    "tables/clock_alignment_audit.csv": {
         "run_id_or_group", "clock_domain", "host", "timestamp_type", "sync_method",
-        "offset_estimate_ms", "drift_estimate", "alignment_residual_ms",
-        "timestamp_resolution_ms", "confidence", "phase_scan_performed",
-        "phase_effect_verdict", "notes",
+        "offset_estimate_ms", "offset_bound_ms", "drift_estimate_ppm",
+        "dispersion_or_sync_distance_ms", "alignment_residual_ms",
+        "timestamp_resolution_ms", "measurement_window", "source_evidence_ids",
+        "confidence", "p_clock_verdict", "notes",
+    },
+    "tables/phase_audit.csv": {
+        "run_id_or_group", "producer_period_ms", "consumer_period_ms",
+        "bridge_tick_period_ms", "phase_definition", "phase_bins_or_offsets",
+        "scan_performed", "matched_repeats_per_phase", "phase_effect_metric",
+        "phase_effect_estimate", "uncertainty_interval", "phase_effect_verdict",
+        "source_evidence_ids", "p_phase_verdict", "notes",
+    },
+    "tables/dynamic_deadline_construction.csv": {
+        "construction_id", "requirement_id", "run_id_or_group", "method",
+        "method_version", "state_time", "state_time_basis", "state_available_by_t1",
+        "input_cutoff_time", "latest_input_time", "input_provenance_json",
+        "parameter_selection_time", "parameter_selection_locked_by_t1",
+        "current_run_post_t1_data_used", "current_run_outcome_used",
+        "d_clear_m", "v_ego_mps", "v_front_mps", "d_safe_m",
+        "a_ego_response_max_mps2", "b_ego_min_mps2", "b_front_max_mps2",
+        "parameter_bounds_json", "uncertainty_method", "uncertainty_sample_count",
+        "braking_envelope_id", "braking_envelope_provenance",
+        "braking_envelope_status", "validation_dataset_independent",
+        "validation_scope", "target_motion_assumption", "road_condition_assumption",
+        "calibration_run_ids", "evaluation_run_ids",
+        "tau_req_low_ms", "tau_req_center_ms", "tau_req_high_ms",
+        "parameter_bounds_complete", "construction_status", "qualification",
+        "source_evidence_ids", "notes",
+    },
+    "tables/velocity_trajectory_observed.csv": {
+        "run_id", "sample_index", "t_wall_s", "speed_mps", "clock_domain",
+        "source_file", "source_locator", "availability", "quality_flags",
+    },
+    "tables/l5_recomputation.csv": {
+        "run_id", "requirement_id", "t1_wall_s", "t_deadline_wall_s", "te_wall_s",
+        "D_response_recomputed_m", "D_debt_recomputed_m", "D_response_reported_m",
+        "D_debt_reported_m", "D1_observed_m", "D_brake_observed_m",
+        "M0_recomputed_m", "M0_reported_m", "endpoint_coverage", "max_abs_error_m",
+        "tolerance_m", "recomputation_status", "notes",
+    },
+    "tables/diagnosis_hypothesis_ledger.csv": {
+        "hypothesis_id", "run_id_or_group", "seed_claim_id", "seed_evidence_ids",
+        "candidate_layer", "candidate_component", "candidate_fault_type", "hypothesis",
+        "path_claim_ids", "supporting_evidence_ids", "challenging_evidence_ids",
+        "alternative_hypothesis_ids", "required_prerequisite_claim_ids",
+        "diagnosability_class", "equivalence_class_id", "status", "rank_score",
+        "rank_method", "maximum_diagnosis_strength", "discriminating_test",
+        "residual_uncertainty", "allowed_language", "forbidden_language",
+    },
+    "tables/diagnosis_edges.csv": {
+        "parent_id", "child_id", "relation", "time_direction", "required", "notes",
     },
     "tables/requirement_registry.csv": {
         "requirement_id", "run_id_or_group", "requirement_name", "requirement_value",
@@ -269,6 +325,17 @@ def validate(root: Path) -> Dict[str, Any]:
     warnings: List[Dict[str, str]] = []
     loaded: Dict[str, List[Dict[str, str]]] = {}
 
+    # L5 is validator-authoritative: recompute from the saved wall-clock velocity
+    # trajectory (or extract it from traceable Localization sources) before any
+    # semantic judgment.  An inability to recompute remains an explicit row.
+    try:
+        recompute_analysis(root, tolerance_m=0.02, write_output=True)
+    except (OSError, ValueError, csv.Error) as exc:
+        errors.append(
+            {"check": "l5_recomputation", "path": "tables/l5_recomputation.csv",
+             "message": "validator could not recompute L5: %s" % exc}
+        )
+
     for relative in sorted(REQUIRED_FILES):
         if not (root / relative).exists():
             errors.append({"check": "required_file", "path": relative, "message": "missing"})
@@ -277,6 +344,24 @@ def validate(root: Path) -> Dict[str, Any]:
         columns, rows = read_csv(root / relative)
         loaded[relative] = rows
         add_schema_error(errors, relative, columns, required_columns)
+
+    deadline_rows = loaded.get("tables/dynamic_deadline_construction.csv", [])
+    recomputed_deadline_rows = [construct_row(row) for row in deadline_rows]
+    for source, recomputed in zip(deadline_rows, recomputed_deadline_rows):
+        mismatched_fields = [
+            field for field in (
+                "tau_req_low_ms", "tau_req_center_ms", "tau_req_high_ms",
+                "construction_status", "qualification",
+            )
+            if str(source.get(field) or "").strip() != str(recomputed.get(field) or "").strip()
+        ]
+        if mismatched_fields:
+            errors.append(
+                {"check": "dynamic_deadline_recomputation",
+                 "path": "tables/dynamic_deadline_construction.csv",
+                 "message": "stored deadline construction differs from validator recomputation: %s" %
+                 ", ".join(mismatched_fields)}
+            )
 
     rag_rows = loaded.get("tables/realtime_rag_summary.csv", [])
     rag_dimensions = {str(row.get("dimension") or "").strip().upper() for row in rag_rows}
@@ -402,17 +487,22 @@ def validate(root: Path) -> Dict[str, Any]:
                  "message": "full report is missing %s coverage" % label}
             )
     semantic_issues = validate_argument_rows(
-        loaded.get("tables/claim_ledger.csv", []),
-        loaded.get("tables/evidence_ledger.csv", []),
-        loaded.get("tables/claim_edges.csv", []),
-        loaded.get("tables/defeater_ledger.csv", []),
-        loaded.get("tables/temporal_fault_signature.csv", []),
-        loaded.get("tables/pre_hazard_state_audit.csv", []),
-        loaded.get("tables/functional_correctness_audit.csv", []),
-        loaded.get("tables/clock_phase_audit.csv", []),
-        loaded.get("tables/requirement_registry.csv", []),
-        observed_rows,
-        report_text,
+        claims=loaded.get("tables/claim_ledger.csv", []),
+        evidence=loaded.get("tables/evidence_ledger.csv", []),
+        edges=loaded.get("tables/claim_edges.csv", []),
+        defeaters=loaded.get("tables/defeater_ledger.csv", []),
+        fault_signatures=loaded.get("tables/temporal_fault_signature.csv", []),
+        pre_hazard_rows=loaded.get("tables/pre_hazard_state_audit.csv", []),
+        functional_rows=loaded.get("tables/functional_correctness_audit.csv", []),
+        clock_rows=loaded.get("tables/clock_alignment_audit.csv", []),
+        requirement_rows=loaded.get("tables/requirement_registry.csv", []),
+        observed_rows=observed_rows,
+        report_text=report_text,
+        phase_rows=loaded.get("tables/phase_audit.csv", []),
+        dynamic_deadline_rows=recomputed_deadline_rows,
+        l5_rows=loaded.get("tables/l5_recomputation.csv", []),
+        diagnosis_rows=loaded.get("tables/diagnosis_hypothesis_ledger.csv", []),
+        diagnosis_edges=loaded.get("tables/diagnosis_edges.csv", []),
     )
     for item in semantic_issues:
         target = errors if item.get("severity") == "ERROR" else warnings
@@ -437,7 +527,7 @@ def validate(root: Path) -> Dict[str, Any]:
         )
 
     return {
-        "protocol": "TCPS-PA Diagnostic Protocol v2",
+        "protocol": "TCPS-PA Diagnostic Protocol v2.1",
         "analysis_dir": str(root.resolve()),
         "status": "PASS" if not errors else "FAIL",
         "error_count": len(errors),
@@ -456,7 +546,7 @@ def validate(root: Path) -> Dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate TCPS-PA v2 analysis outputs")
+    parser = argparse.ArgumentParser(description="Validate TCPS-PA v2.1 analysis outputs")
     parser.add_argument("--analysis-dir", type=Path, required=True)
     parser.add_argument("--mode", choices=("full", "record-only"), default="full")
     return parser.parse_args()

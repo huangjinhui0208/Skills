@@ -12,6 +12,7 @@
 8. L6 Physical Safety Degradation
 9. C7 Temporal Safety Attribution
 10. Cross-run and feedback rules
+11. Backward temporal-defect diagnosis
 
 ## 1. Purpose and event notation
 
@@ -34,6 +35,13 @@ The inference chain is governed separately by [inference-contract.md](inference-
 | `t_o` | observed outcome endpoint | stop, collision, minimum-speed proxy, or collection end |
 
 Every timestamp must state clock domain, host, type, resolution, and alignment status. Do not subtract incompatible clocks.
+
+Maintain two separate prerequisites:
+
+- `P_CLOCK`: timestamp comparability under a bounded error budget;
+- `P_PHASE`: equivalence or characterized sensitivity of sampling/timer/CARLA-tick phase.
+
+Clock alignment is not phase equivalence. Phase quantization can exist on a synchronized clock; clock offset can exist when periodic phases are nominally equal.
 
 ## 2. Common layer-gate structure
 
@@ -188,6 +196,8 @@ Uses same-run post-outcome information such as full stopping behavior. It suppor
 
 Uses state available before response/outcome plus a predeclared external requirement or independently calibrated/validated physical envelope. This is the only primary C4 deadline.
 
+When `tau_req` is constructed rather than imported, apply [dynamic-deadline-contract.md](dynamic-deadline-contract.md). The default longitudinal construction solves the maximum feasible response time inside a declared RSS-like braking envelope. Do not infer that envelope from the evaluated run's post-response stopping trajectory.
+
 #### C. Model-predicted deadline `tau_model`
 
 Mark `VALIDATED_MODEL` or `UNVALIDATED_MODEL`. An unvalidated/current-sample model yields `MODEL_SUPPORTED_ONLY`, not primary C4.
@@ -249,6 +259,16 @@ Primary debt is `REQUIREMENT_CONSTRAINED_DERIVED`: qualified `tau_req` plus obse
 - model deadline -> `D_debt_model_predicted_m` with `MODEL_TAINT`;
 - retrospective deadline -> `D_debt_retro_diagnostic_m` with `RETRO_TAINT`;
 - neither may be named directly observed primary debt.
+
+### Validator-authoritative recomputation
+
+Save wall-clock velocity samples to `velocity_trajectory_observed.csv` and run:
+
+```bash
+python3 <skill-dir>/scripts/recompute_l5_metrics.py --analysis-dir <analysis-dir>
+```
+
+The validator recomputes endpoint-interpolated trapezoidal integrals at `t1`, `t_d=t1+tau_req`, and `t_e`. It reconciles computed values with evidence and space-budget tables under a declared tolerance. A scalar `REQUIREMENT_CONSTRAINED_DERIVED` row without valid sample ancestry cannot strong-pass C5.
 
 ### Space-budget decomposition
 
@@ -326,3 +346,30 @@ Cyber-physical feedback can tighten later requirements:
 If the fault began before t1, D1/v1 can be part of that feedback. Classify their causal role before calling them confounders.
 
 With baseline plus one nonzero delay level, report only an observed incremental end-to-end response ratio. Stable propagation gain requires multiple nonzero levels, repeats, controlled state, uncertainty estimates, and an approximately stable dose response.
+
+## 11. Backward temporal-defect diagnosis
+
+Use backward mode when an injected C1 fault is absent or when the task is to diagnose an observed C4 miss/L6 loss:
+
+`L4/L6 seed -> L3 lineage segment -> L2 R/A/G symptom -> L1 source hypothesis`.
+
+This is abductive diagnosis, not logical reversal. For each seed:
+
+1. freeze the observed miss/outcome and its scope;
+2. enumerate upstream candidates from the executed architecture: source timestamp/age, sensor/module gap, execution/WCET tail, queue/backlog, reuse/staleness, scheduling, network/Bridge delay, actuation latency, clock artifact, phase artifact, target mismatch, functional failure, and physical/braking/geometry alternatives;
+3. retain only candidates with a physically and temporally possible path to the seed;
+4. attach support, challenge, contradiction, and critical prerequisites;
+5. compute observational equivalence classes and diagnosability;
+6. rank only among non-refuted candidates and expose the ranking method;
+7. state the discriminating evidence/test needed to isolate each candidate.
+
+Required statuses: `SUPPORTED_CANDIDATE`, `CONSISTENT_BUT_UNRESOLVED`, `CHALLENGED`, `REFUTED`, `NOT_TESTABLE`, `NOT_APPLICABLE`.
+
+Diagnosis strengths:
+
+- `DETECTED`: downstream violation/outcome directly established;
+- `LOCALIZED_TO_SEGMENT`: lineage bounds the responsible segment;
+- `ISOLATED_CANDIDATE`: one candidate remains after alternatives are refuted/bounded;
+- `INTRINSIC_DEFECT_SUPPORTED`: external injection, clock/phase artifacts, functional/physical alternatives, and observationally equivalent candidates are resolved, with repeatability and internal mechanism evidence.
+
+Write `diagnosis_hypothesis_ledger.csv` and `diagnosis_edges.csv`. The backward ledger cannot modify C1-C7 verdicts; forward claims change only through new admissible evidence and normal inference rules.

@@ -39,7 +39,14 @@ The report is a view of the validated Claim Ledger, not an independent source of
 │   ├── pre_hazard_state_audit.csv
 │   ├── functional_correctness_audit.csv
 │   ├── clock_phase_audit.csv
+│   ├── clock_alignment_audit.csv
+│   ├── phase_audit.csv
 │   ├── requirement_registry.csv
+│   ├── dynamic_deadline_construction.csv
+│   ├── velocity_trajectory_observed.csv
+│   ├── l5_recomputation.csv
+│   ├── diagnosis_hypothesis_ledger.csv
+│   ├── diagnosis_edges.csv
 │   ├── event_timeline.csv
 │   ├── stage_timing_and_freshness.csv
 │   ├── record_timing_diagnostics.csv
@@ -259,6 +266,29 @@ Minimum:
 - `phase_effect_verdict`
 - `notes`
 
+Legacy compatibility only. New full analyses must also emit the separated schemas below.
+
+### 4.4a `clock_alignment_audit.csv`
+
+Minimum:
+
+- `run_id_or_group`, `comparison_id`, `clock_domain_a`, `clock_domain_b`;
+- `host_a`, `host_b`, `timestamp_type_a`, `timestamp_type_b`;
+- `sync_method`, `anchor_method`, `offset_estimate_ms`, `drift_ppm`;
+- `alignment_residual_ms`, `timestamp_resolution_ms`, `jitter_ms`, `dispersion_ms`, `error_budget_ms`;
+- `comparison_tolerance_ms`, `p_clock_verdict`, `confidence`, `source_evidence_ids`, `notes`.
+
+### 4.4b `phase_audit.csv`
+
+Minimum:
+
+- `run_id_or_group`, `phase_pair_id`, `producer`, `consumer`;
+- `producer_period_ms`, `consumer_period_ms`, `phase_origin`, `phase_offset_ms`;
+- `carla_fixed_delta_ms`, `injection_phase_ms`, `phase_to_tick_ms`;
+- `phase_scan_performed`, `scan_levels`, `repeats_per_level`;
+- `effect_metric`, `effect_estimate`, `effect_uncertainty`, `phase_effect_verdict`;
+- `p_phase_verdict`, `confidence`, `source_evidence_ids`, `notes`.
+
 ### 4.5 `requirement_registry.csv`
 
 Minimum:
@@ -280,6 +310,10 @@ Minimum:
 - `validation_scope`
 - `p_deadline_qualification`
 - `notes`
+
+### 4.5a `dynamic_deadline_construction.csv`
+
+Use the complete schema in [dynamic-deadline-contract.md](dynamic-deadline-contract.md). A constructed deadline used by P_DEADLINE/C4 must be `QUALIFIED_DYNAMIC_PHYSICAL` and linked by exact `requirement_id`.
 
 ### 4.6 `realtime_rag_summary.csv`
 
@@ -327,6 +361,38 @@ Minimum:
 
 At minimum audit: evidence/model separation, Claim Graph/gates, Temporal Fault Signature, R/A/G tails, strict lineage, independent `tau_req`, observed primary Distance Debt, space budget, continuous safety scale, P_FUNC, clock/phase, pre-hazard divergence, and paper-level validation design. Distinguish structural completion from empirical completion.
 
+### 4.9 `velocity_trajectory_observed.csv` and `l5_recomputation.csv`
+
+Velocity input minimum:
+
+- `run_id`, `sample_index`, `t_wall_s`, `speed_mps`, `clock_domain`;
+- `source_file`, `source_locator`, `availability`, `quality_flags`.
+
+Recomputation output minimum:
+
+- `run_id`, `requirement_id`, `t1_wall_s`, `t_deadline_wall_s`, `te_wall_s`;
+- `D_response_recomputed_m`, `D_debt_recomputed_m`;
+- `D_response_reported_m`, `D_debt_reported_m`;
+- `D1_observed_m`, `D_brake_observed_m`, `M0_recomputed_m`, `M0_reported_m`;
+- `endpoint_coverage`, `max_abs_error_m`, `tolerance_m`, `recomputation_status`, `notes`.
+
+### 4.10 Backward diagnosis tables
+
+`diagnosis_hypothesis_ledger.csv` minimum:
+
+- `hypothesis_id`, `run_id_or_group`, `seed_claim_id`, `seed_evidence_ids`;
+- `candidate_layer`, `candidate_component`, `candidate_fault_type`, `hypothesis`;
+- `path_claim_ids`, `supporting_evidence_ids`, `challenging_evidence_ids`, `alternative_hypothesis_ids`;
+- `required_prerequisite_claim_ids`, `diagnosability_class`, `equivalence_class_id`;
+- `status`, `rank_score`, `rank_method`, `maximum_diagnosis_strength`;
+- `discriminating_test`, `residual_uncertainty`, `allowed_language`, `forbidden_language`.
+
+`diagnosis_edges.csv` minimum:
+
+- `parent_id`, `child_id`, `relation`, `time_direction`, `required`, `notes`.
+
+Allowed relations are `SEEDS_DIAGNOSIS`, `CONSISTENT_WITH`, `CHALLENGED_BY`, and `DISCRIMINATES`; `time_direction` must be `BACKWARD_DIAGNOSTIC`.
+
 ## 5. Observed/model tables
 
 ### 5.1 Observed table
@@ -365,6 +431,7 @@ Canonical v2:
 ## Scope, architecture, intervention, and references
 ## Event semantics and executable gate definitions
 ## Evidence, clocks/phase, targets, functionality, pre-hazard state, and deadline qualification
+## Forward fault-injection analysis and backward temporal-defect diagnosis
 ## L1 Temporal Fault Signature
 ## L2 Temporal Degradation and R/A/G tails
 ## L3 Cause-Effect Temporal Propagation

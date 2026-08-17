@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Semantic inference checks for TCPS-PA Diagnostic Protocol v2.
+"""Semantic inference checks for TCPS-PA Diagnostic Protocol v2.1.
 
 This module is deliberately standard-library only.  It validates whether an
 evidence/claim graph is methodologically admissible; it does not compute the
@@ -64,7 +64,7 @@ WEAK_VERDICTS = {
 }
 
 REQUIRED_CLAIM_BASES = {
-    "P_CLOCK", "P_TARGET", "P_FUNC", "P_DEADLINE",
+    "P_CLOCK", "P_PHASE", "P_TARGET", "P_FUNC", "P_DEADLINE",
     "C1", "C2", "C3", "C4", "C5", "C6", "C7",
 }
 
@@ -433,6 +433,11 @@ def validate_argument_rows(
     requirement_rows: Sequence[Mapping[str, Any]] = (),
     observed_rows: Sequence[Mapping[str, Any]] = (),
     report_text: str = "",
+    phase_rows: Sequence[Mapping[str, Any]] = (),
+    dynamic_deadline_rows: Sequence[Mapping[str, Any]] = (),
+    l5_rows: Sequence[Mapping[str, Any]] = (),
+    diagnosis_rows: Sequence[Mapping[str, Any]] = (),
+    diagnosis_edges: Sequence[Mapping[str, Any]] = (),
 ) -> List[Dict[str, str]]:
     """Return semantic issues. Errors are methodological contract violations."""
 
@@ -976,6 +981,43 @@ def validate_argument_rows(
                             claim_id,
                         )
                     )
+                applicable_l5 = [
+                    row for row in l5_rows
+                    if claim_scope(claim).lower() in {"all", "all_runs", "group"}
+                    or clean(row.get("run_id")) == claim_scope(claim)
+                ]
+                failed_l5 = [
+                    row for row in applicable_l5
+                    if upper(row.get("recomputation_status")) != "PASS"
+                ]
+                recomputed_by_run = {
+                    clean(row.get("run_id")): row for row in applicable_l5
+                    if clean(row.get("run_id"))
+                }
+                debt_mismatches: List[str] = []
+                for debt in debt_rows:
+                    run_id = clean(debt.get("run_id"))
+                    recomputed = recomputed_by_run.get(run_id)
+                    if not recomputed:
+                        debt_mismatches.append(run_id or "<unscoped>")
+                        continue
+                    declared = safe_float(debt.get("value"))
+                    authoritative = safe_float(recomputed.get("D_debt_recomputed_m"))
+                    tolerance = safe_float(recomputed.get("tolerance_m")) or 0.02
+                    if (
+                        declared is None or authoritative is None
+                        or upper(debt.get("unit")) not in {"M", "METER", "METERS"}
+                        or abs(declared - authoritative) > tolerance
+                    ):
+                        debt_mismatches.append(run_id or "<unscoped>")
+                if not applicable_l5 or failed_l5 or debt_mismatches:
+                    issues.append(
+                        issue(
+                            "ERROR", "V18",
+                            "C5 PASS requires validator-recomputed wall-clock L5 rows with PASS status and debt values matching raw velocity integration",
+                            claim_id,
+                        )
+                    )
             model_debt = any(
                 upper(row.get("evidence_class")) in {"UNVALIDATED_MODEL", "VALIDATED_MODEL"}
                 and (
@@ -1072,13 +1114,55 @@ def validate_argument_rows(
             for row in support
         )
         if base == "P_CLOCK" and verdict == "PASS" and not local_clock_only:
-            clock_confidence = {upper(row.get("confidence")) for row in clock_rows}
-            phase_states = {upper(row.get("phase_effect_verdict")) for row in clock_rows}
-            if not clock_rows or clock_confidence - {"HIGH"} or phase_states & {"NOT_TESTABLE", "UNKNOWN", ""}:
+            scope = claim_scope(claim)
+            applicable_clock_rows = [
+                row for row in clock_rows
+                if scope.lower() in {"all", "all_runs", "group"}
+                or clean(row.get("run_id_or_group")) in {scope, "all_runs", "all"}
+            ]
+            clock_complete = bool(applicable_clock_rows) and all(
+                upper(row.get("confidence")) == "HIGH"
+                and upper(row.get("sync_method")) not in {"", "NONE", "UNKNOWN", "UNVERIFIED"}
+                and all(
+                    safe_float(row.get(field)) is not None
+                    for field in (
+                        "offset_estimate_ms", "drift_estimate_ppm",
+                        "alignment_residual_ms", "timestamp_resolution_ms",
+                    )
+                )
+                for row in applicable_clock_rows
+            )
+            if not clock_complete:
                 issues.append(
                     issue(
                         "ERROR", "V8",
-                        "cross-host P_CLOCK PASS conflicts with incomplete clock/phase audit",
+                        "cross-host P_CLOCK PASS conflicts with an incomplete scoped clock-alignment audit",
+                        claim_id,
+                    )
+                )
+
+        if base == "P_PHASE" and verdict == "PASS":
+            scope = claim_scope(claim)
+            applicable_phase_rows = [
+                row for row in phase_rows
+                if scope.lower() in {"all", "all_runs", "group"}
+                or clean(row.get("run_id_or_group")) in {scope, "all_runs", "all"}
+            ]
+            phase_complete = bool(applicable_phase_rows) and all(
+                boolish(row.get("scan_performed"))
+                and bool(clean(row.get("phase_definition")))
+                and bool(clean(row.get("phase_bins_or_offsets")))
+                and (safe_float(row.get("matched_repeats_per_phase")) or 0) >= 2
+                and upper(row.get("phase_effect_verdict"))
+                not in {"", "UNKNOWN", "NOT_TESTABLE"}
+                and bool(clean(row.get("source_evidence_ids")))
+                for row in applicable_phase_rows
+            )
+            if not phase_complete:
+                issues.append(
+                    issue(
+                        "ERROR", "V19",
+                        "P_PHASE PASS requires a scoped active phase scan with matched repeats, an explicit phase definition, and a resolved effect verdict",
                         claim_id,
                     )
                 )
@@ -1107,6 +1191,92 @@ def validate_argument_rows(
                         claim_id,
                     )
                 )
+
+    # V17: a qualified constructed deadline must be traceable to a valid,
+    # prospective dynamic-physical construction with numerically matching bounds.
+    constructions = {
+        clean(row.get("requirement_id")): row
+        for row in dynamic_deadline_rows if clean(row.get("requirement_id"))
+    }
+    for requirement in requirement_rows:
+        deadline_type = upper(requirement.get("deadline_type"))
+        qualification = upper(requirement.get("p_deadline_qualification"))
+        if not ({"DYNAMIC", "CONSTRUCTED"} & set(deadline_type.replace("-", "_").split("_"))):
+            continue
+        if "QUALIFIED" not in qualification or "NOT_QUALIFIED" in qualification:
+            continue
+        requirement_id = clean(requirement.get("requirement_id"))
+        constructed = constructions.get(requirement_id)
+        numeric_match = False
+        if constructed and upper(constructed.get("qualification")) == "QUALIFIED_DYNAMIC_PHYSICAL":
+            numeric_match = all(
+                safe_float(requirement.get(req_field)) is not None
+                and safe_float(constructed.get(construction_field)) is not None
+                and abs(
+                    float(requirement.get(req_field))
+                    - float(constructed.get(construction_field))
+                ) <= 1e-6
+                for req_field, construction_field in (
+                    ("tau_req_low_ms", "tau_req_low_ms"),
+                    ("tau_req_center_ms", "tau_req_center_ms"),
+                    ("tau_req_high_ms", "tau_req_high_ms"),
+                )
+            )
+        if not numeric_match:
+            issues.append(
+                issue(
+                    "ERROR", "V17",
+                    "qualified dynamic/constructed deadline lacks a matching prospective construction with qualified braking envelope and uncertainty bounds",
+                )
+            )
+
+    # V20: backward traversal is a diagnostic candidate graph, not a reversed
+    # causal proof.  Isolation needs explicit discrimination of alternatives.
+    diagnosis_by_id = {
+        clean(row.get("hypothesis_id")): row
+        for row in diagnosis_rows if clean(row.get("hypothesis_id"))
+    }
+    if len(diagnosis_by_id) != len([row for row in diagnosis_rows if clean(row.get("hypothesis_id"))]):
+        issues.append(issue("ERROR", "V20", "diagnosis hypothesis_id values must be unique"))
+    allowed_diagnosis_statuses = {
+        "NOT_TESTABLE", "CONSISTENT_BUT_UNRESOLVED", "REFUTED",
+        "BOUNDED_TO_EQUIVALENCE_CLASS", "ISOLATED_BY_DISCRIMINATING_TEST",
+    }
+    for row in diagnosis_rows:
+        hypothesis_id = clean(row.get("hypothesis_id"))
+        seed = claims_by_id.get(clean(row.get("seed_claim_id")))
+        status = upper(row.get("status"))
+        if not seed or base_claim_id(clean(seed.get("claim_id"))) not in {"C4", "C6"}:
+            issues.append(issue("ERROR", "V20", "diagnosis seed must be a scoped C4/C6 claim", hypothesis_id))
+        if status not in allowed_diagnosis_statuses:
+            issues.append(issue("ERROR", "V20", "unknown diagnosis status: %s" % status, hypothesis_id))
+        alternatives = split_ids(row.get("alternative_hypothesis_ids"))
+        if status in {"CONSISTENT_BUT_UNRESOLVED", "BOUNDED_TO_EQUIVALENCE_CLASS"} and not alternatives:
+            issues.append(issue("ERROR", "V20", "unresolved diagnosis must enumerate alternatives", hypothesis_id))
+        if status == "ISOLATED_BY_DISCRIMINATING_TEST":
+            alternatives_refuted = alternatives and all(
+                item in diagnosis_by_id
+                and upper(diagnosis_by_id[item].get("status")) == "REFUTED"
+                for item in alternatives
+            )
+            if not (
+                split_ids(row.get("supporting_evidence_ids"))
+                and clean(row.get("discriminating_test"))
+                and alternatives_refuted
+            ):
+                issues.append(
+                    issue(
+                        "ERROR", "V20",
+                        "isolated diagnosis requires discriminating evidence and every declared alternative to be REFUTED",
+                        hypothesis_id,
+                    )
+                )
+    for row in diagnosis_edges:
+        relation = upper(row.get("relation"))
+        if relation not in {"SEEDS_DIAGNOSIS", "CONSISTENT_WITH", "CHALLENGES", "REFUTES", "DISCRIMINATES"}:
+            issues.append(issue("ERROR", "V20", "illegal backward diagnosis relation: %s" % relation))
+        if upper(row.get("time_direction")) != "BACKWARD_DIAGNOSTIC":
+            issues.append(issue("ERROR", "V20", "diagnosis edge must declare BACKWARD_DIAGNOSTIC time_direction"))
 
     # V9/V10: pre-hazard state divergence.
     pre_hazard_by_run: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
